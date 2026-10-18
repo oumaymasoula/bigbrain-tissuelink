@@ -1,0 +1,8 @@
+siibra==1.0.1a25
+numpy
+Pillow
+nibabel
+streamlit
+streamlit-drawable-canvas
+streamlit-image-coordinates
+pytest

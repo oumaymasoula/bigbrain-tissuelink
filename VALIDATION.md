@@ -1,0 +1,126 @@
+# Validation record
+
+This record separates checks that were actually performed from checks that were not.
+All retrievals used the local `.venv`, public data, and a 10 MiB `max_bytes` budget.
+
+## Passed checks
+
+### Direct siibra comparison
+
+The exported default bundle was compared with a fresh direct `siibra` fetch using the same:
+
+- section: `73c1fa55-d099-4854-8cda-c9a403c6080a--4427460c6af460478c6ce4cdb0264126` (#3458)
+- source: `https://1um.brainatlas.eu/registered_sections/bigbrain/B20_3458/precomputed`
+- coordinate space: `bigbrain` / BigBrain microscopic template (histology)
+- bounds: `[-20.0, -0.87, -20.0, -18.0, -0.85, -18.0]` mm, ordered as min x/y/z then max x/y/z
+- requested resolution: `0.01` mm
+
+Results from `outputs/direct_validation/direct_comparison.json`:
+
+- raw arrays: `np.array_equal=True`, maximum absolute raw difference `0`
+- shape: `(251, 2, 251)` in both images
+- dtype and finite range: `uint8`, `0..255`
+- actual voxel size: `[0.00800000038, 0.01999999955, 0.00800000038]` mm in both NIfTI reads
+- affine: equal within `1e-6`; maximum absolute difference `4.7683715e-09` mm, caused by NIfTI float32 serialization versus the direct float64 provider affine
+- raw NIfTI byte-content hash of the canonical reconstructed image: identical on both sides
+
+The exact full-precision reproduction command copied from `metadata.json` was executed into `outputs/reproduction_command_check/`. Its output matched the UI export: shape equal, raw values `np.array_equal=True`, maximum absolute raw difference `0`, affine allclose within `1e-6`, and voxel sizes equal.
+
+Software recorded by the comparison: Python 3.12.3, siibra 1.0.1-alpha.25, NumPy 2.5.4, nibabel 5.4.2, Streamlit 1.66.0.
+
+### Selection path
+
+Local geometry tests passed (`pytest -q`: 5 passed), including a flipped affine and zoomed/panned view round trip. The browser interaction test previously performed on the running app showed:
+
+- an asymmetric dragged rectangle mapped all four display edges into source x/z bounds and populated the six numeric fields;
+- zoom and horizontal pan preserved the same physical bounds after the stale-canvas bug was fixed;
+- changing a numeric bound changed the displayed rectangle and invalidated the prior preview/confirmation;
+- the default #3458 overview loaded, the exact crop preview succeeded, confirmation was required, and the ZIP download control was exercised;
+- switching sections cleared the old crop and confirmation state.
+
+The preserved asymmetric real-data example is x=`[-41.121199, -24.989489]`, y=`[-0.8695, -0.8495]`, z=`[-25.177701, -17.113701]` mm. Its independent bounded export is `outputs/asymmetric_demo/`, shape `(2017, 2, 1009)`, actual voxel size `[0.008, 0.020, 0.008]` mm. Its visualization was inspected and contains tissue architecture plus a recognizable large white fissure/background boundary. The export metadata records all four boundaries.
+
+### Resolution handling
+
+Both requests were bounded to the same 2 mm × 0.02 mm × 2 mm region:
+
+| Requested | Returned shape | Returned voxel size | Uncompressed estimate |
+|---|---:|---:|---:|
+| 0.01 mm | `(251, 2, 251)` | `[0.008, 0.020, 0.008]` mm | 126,002 bytes |
+| 0.1 mm | `(33, 2, 32)` | `[0.064, 0.020, 0.064]` mm | 2,112 bytes |
+
+The app now requires an explicit checkbox acceptance before a coarser 0.1 mm preview can be requested. Requested resolution is never presented as the returned resolution; the returned provider voxel size is shown and placed in metadata.
+
+### Export contents
+
+`outputs/ui_export/bigbrain_cutout_bundle.zip` contains `bigbrain_crop.nii.gz`, `bigbrain_crop_preview.png`, and `metadata.json`. The scientific NIfTI opens with nibabel and has the validated shape, affine, and voxel sizes. The PNG is labelled as a visualization and uses contrast stretching only; raw uint8 values remain in NIfTI. Metadata includes section, source, coordinate space, requested and actual bounds/resolution, orientation, voxel-centre and edge conventions, software versions, retrieval date, license, checksum, and a full-precision reproduction command.
+
+### Thickness representation
+
+The two y samples are not duplicates. For the default crop, nonzero counts were `[0, 62827]` and means were `[0.0, 145.09]`; narrowing around the provider voxel centre returned one y sample with the same tissue data. The first plane is provider zero-filled padding, the second is tissue. No plane is squeezed or discarded.
+
+Affine coordinates are voxel centres. The edge extent is half a voxel beyond the outer centre on each side. For the default crop, the preserved two-sample y centre range is `[-0.87, -0.85]` mm and the edge extent is approximately `[-0.88, -0.84]` mm.
+
+## Failed checks
+
+- The first direct comparison used exact affine equality and reported a false failure because the exported NIfTI stores affine values as float32 while the direct siibra object retained float64 values. The comparison was corrected to report the measured maximum difference and a documented `1e-6` tolerance; the raw arrays were already exactly equal.
+- A later browser request for a larger asymmetric 60×120-pixel selection became slow against the public provider and was not counted as a completed browser export. The bounded asymmetric CLI export and the earlier successful browser asymmetric preview remain preserved.
+
+## Unperformed checks
+
+- No independent viewer check was performed. The NIfTI was opened with nibabel, not in ITK-SNAP, 3D Slicer, or another separate GUI viewer. Therefore landmark visibility in an independent viewer is not claimed as passed.
+- No anatomical identity or neuroanatomical registration was validated. The landmark statement is limited to visual tissue architecture and a fissure/background boundary in the exported visualization.
+- The app was not tested with every one of the 145 catalogued sections in the browser. Real bounded crops were validated from at least #47, #500, and #3458, with section-specific failures reported rather than substituted.
+
+## Independent viewer instructions
+
+Open `outputs/ui_export/bigbrain_crop.nii.gz` or the NIfTI extracted from another bundle in ITK-SNAP (`itksnap path/to/bigbrain_crop.nii.gz`) or 3D Slicer. Use the NIfTI world coordinates as the `bigbrain` / BigBrain microscopic template (histology) coordinate space; do not interpret them as patient MRI or MNI coordinates. The affine maps voxel centres in array x/y/z order, with y representing section thickness. Compare the displayed x/z location and bounds to `metadata.json`; the PNG is only a contrast-adjusted visualization. This procedure is documented for reproducibility but was not executed in an independent viewer in this validation run.
+
+## BigBrain Scout comparison
+
+The current public Scout repository reviewed was [esreekarreddy/scout](https://github.com/esreekarreddy/scout), README at [README.md](https://github.com/esreekarreddy/scout/blob/main/README.md), current tree reviewed at commit `f3f943504337e253cc047fcdf67c1e0b7eebe219`. Its README and implementation describe a Next.js/TypeScript verification layer for AI-written code: specialist scouts, judge findings, evidence packs/graphs, patch tournament, execution gates, MCP tools, and GitHub-repository review. Relevant implementation areas include `src/app/api/review/route.ts`, `src/app/api/fix/route.ts`, and `src/components/scout/`.
+
+There is overlap only at a high level: both projects emphasize bounded, evidence-backed verification and explicit reporting. BigBrain Cutout is a separate local Python/Streamlit data-retrieval tool that uses siibra to fetch a bounded histological image, maps a rectangle through an affine, preserves raw voxel values, and emits a spatial NIfTI plus provenance ZIP. Scout does not appear to implement BigBrain section discovery, histology crop retrieval, affine/voxel-bound reporting, or NIfTI export. This is a scope comparison, not a novelty claim; interface appearance alone is not evidence of originality.
+
+## Limitations
+
+- Public provider availability and response behavior can change.
+- The actual provider resolution may differ from the requested resolution; coarse requests require explicit acceptance in the app.
+- A full section is never downloaded by the project, but the selected rectangle must still fit the configured 10 MiB request budget.
+- Provider zero-filled thickness planes are preserved because they are part of the returned representation; users must inspect metadata before interpreting thickness.
+- The preview applies a 1st–99th percentile linear contrast stretch for readability. Scientific exports are raw; preview appearance is not a quantitative intensity display.
+- No region-name search or automatic registration is included.
+
+Annotation-tool feasibility is documented separately in [ANNOTATION_INTEGRATION.md](ANNOTATION_INTEGRATION.md). It uses the existing crop only and does not change the validated downloader or exports.
+
+## Integrated polygon annotation
+
+Automated checks passed in `tests/test_polygon_annotations.py` for Fabric
+polygon point normalization, scale/affine mapping, axis order, and annotated
+ZIP contents. The complete suite was run as `pytest -q`: **15 passed**.
+
+Browser-level checks passed on the local app for the preserved #3458 crop:
+
+- preview succeeded with shape `(251, 2, 251)` and actual voxel size
+  approximately `[0.008, 0.020, 0.008] mm`;
+- confirmation was required before polygon tools appeared;
+- an asymmetric four-vertex polygon was created on the crop canvas;
+- its label was changed to `browser_landmark`;
+- the app displayed both crop and section-overview polygon overlays;
+- the mapped vertices stayed within the crop shape and used y-plane `1`;
+- the annotated ZIP download control became available and produced
+  `outputs/ui_annotation_export/bigbrain_cutout_bundle.zip`;
+- the ZIP contained the scientific NIfTI, visualization PNG, metadata,
+  `polygon_annotations.json`, and `polygon_mapping.json`;
+- independent local inspection confirmed the exported label and all mapped
+  voxel vertices were in bounds.
+
+The browser test did not independently verify a human landmark identity; the
+label is a user annotation only. Canvas editing/deletion controls are exposed
+and the mapping helper has scale tests, but a separate browser drag-resize and
+delete interaction was not completed in this run. The existing overview
+zoom/pan mapping tests remain covered by `tests/test_geometry.py`; the crop
+polygon canvas itself has no independent zoom control, so overview zoom/pan
+only changes its display placement, not the exported physical vertices.
+
+The Labelme import parser has automated checks for the existing mapping fixture, wrong-image checksum, wrong dimensions, unsupported shape type, non-finite vertices, and zoom/pan display remapping. A real polygon drawn and saved by the external Labelme GUI remains unperformed; the generated JSON fixture is not counted as that round trip.
