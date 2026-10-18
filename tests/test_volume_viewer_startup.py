@@ -14,8 +14,8 @@ def test_shared_navigation_defines_only_the_two_intended_pages():
     assert "st.navigation" in source
     assert 'st.Page("volume_viewer.py"' in source
     assert 'st.Page("pages/1_Validation.py"' in source
-    assert "BigBrain TissueLink — MRI–Histology Explorer" in source
-    assert "BigBrain TissueLink — Alignment review (advanced)" in source
+    assert 'title="MRI–Histology Explorer"' in source
+    assert 'title="Alignment review (advanced)"' in source
     assert "st.page_link" not in source
     assert 'app.py' not in source
 

@@ -19,6 +19,6 @@ def validate_pages(root: Path = ROOT) -> None:
 validate_pages()
 st.set_page_config(page_title="BigBrain TissueLink", layout="wide")
 
-explorer = st.Page("volume_viewer.py", title="BigBrain TissueLink — MRI–Histology Explorer", icon="🧠")
-alignment = st.Page("pages/1_Validation.py", title="BigBrain TissueLink — Alignment review (advanced)", icon="🔎")
+explorer = st.Page("volume_viewer.py", title="MRI–Histology Explorer", icon="🧠")
+alignment = st.Page("pages/1_Validation.py", title="Alignment review (advanced)", icon="🔎")
 st.navigation([explorer, alignment], position="sidebar").run()

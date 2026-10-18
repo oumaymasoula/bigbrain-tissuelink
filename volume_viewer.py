@@ -56,7 +56,8 @@ def validate_navigation_targets(root: Path = ROOT) -> None:
 validate_navigation_targets()
 
 st.set_page_config(page_title="BigBrain TissueLink", layout="wide")
-st.title("BigBrain TissueLink — MRI–Histology Explorer")
+st.title("BigBrain TissueLink")
+st.caption("MRI–Histology Explorer")
 st.warning("Reference data from one donor; anatomical alignment is imperfect.")
 with st.expander("Limitations and provenance", expanded=False):
     st.write(
@@ -230,14 +231,15 @@ if not MRI.path.exists() or not HIST.path.exists():
 
 mri, hist = get_images()
 common = common_world_bounds([mri, hist])
-st.caption("Sources: official donor MRI `3D_MRI/nii/mri_to_blk_aligned.nii.gz` and native histological-space `full8_200um_optbal.nii.gz`.")
-st.info("Anatomical fit is imperfect by the official release documentation. This viewer reports reference-space inspection, not a whole-brain accuracy score.")
 
-meta_col1, meta_col2 = st.columns(2)
-with meta_col1:
-    st.write(f"MRI: orientation {volume_metadata(mri)['orientation']}; voxel size {volume_metadata(mri)['voxel_size_mm_xyz']} mm; shape {volume_metadata(mri)['shape_xyz']}")
-with meta_col2:
-    st.write(f"Native histology: orientation {volume_metadata(hist)['orientation']}; voxel size {volume_metadata(hist)['voxel_size_mm_xyz']} mm; shape {volume_metadata(hist)['shape_xyz']}")
+with st.expander("Advanced · source and technical metadata", expanded=False):
+    st.caption("Sources: official donor MRI `3D_MRI/nii/mri_to_blk_aligned.nii.gz` and native histological-space `full8_200um_optbal.nii.gz`.")
+    st.info("This viewer reports reference-space inspection, not a whole-brain accuracy score.")
+    meta_col1, meta_col2 = st.columns(2)
+    with meta_col1:
+        st.write(f"MRI: orientation {volume_metadata(mri)['orientation']}; voxel size {volume_metadata(mri)['voxel_size_mm_xyz']} mm; shape {volume_metadata(mri)['shape_xyz']}")
+    with meta_col2:
+        st.write(f"Histology: orientation {volume_metadata(hist)['orientation']}; voxel size {volume_metadata(hist)['voxel_size_mm_xyz']} mm; shape {volume_metadata(hist)['shape_xyz']}")
 
 if "location_x_input" not in st.session_state:
     st.session_state.location_x_input = float((common["min"][0] + common["max"][0]) / 2)
@@ -291,16 +293,16 @@ hist_display = add_orientation_labels(add_scale_bar(rgb_with_crosshair(hist_view
 mri_navigation, mri_display_scale = compact_display(mri_display)
 hist_navigation, hist_display_scale = compact_display(hist_display)
 
-st.subheader("Find a location")
-st.caption("Both panels have the same physical X/Z field of view. Click either image to move the shared inspection crosshair. Matching coordinates do not guarantee matching anatomy.")
+st.subheader("1. Find a location")
+st.caption("Click either compact overview to move the shared crosshair. Both panels show the same physical X/Z field of view.")
 col1, col2 = st.columns(2)
 with col1:
     st.markdown("### MRI overview — 0.444 mm")
-    st.caption("Compact navigation view · display contrast only · RAS X/Z")
+    st.caption("Compact navigation · display contrast only · RAS X/Z")
     mri_click = streamlit_image_coordinates(mri_navigation, width=int(mri_navigation.shape[1]), key="location_picker_mri")
 with col2:
     st.markdown("### Histology overview — 200 µm; cells not resolved")
-    st.caption("Compact navigation view · display contrast only · RAS X/Z")
+    st.caption("Compact navigation · display contrast only · RAS X/Z")
     hist_click = streamlit_image_coordinates(hist_navigation, width=int(hist_navigation.shape[1]), key="location_picker_histology")
 for modality, click in (("mri", mri_click), ("histology", hist_click)):
     if click:
@@ -326,8 +328,8 @@ st.info(
     "The displayed 200 µm reconstruction does not provide cellular detail."
 )
 
-st.subheader("Selected location")
-st.info("The enlarged views below cover the same physical neighbourhood. Enlarging 200 µm histology does not reveal individual cells.")
+st.subheader("2. Inspect the linked location")
+st.info("The enlarged views cover the same physical neighbourhood. Enlarging 200 µm histology does not reveal individual cells.")
 half_width_mm = st.slider("Neighbourhood half-width (same physical coverage)", 1.0, 20.0, 5.0, 0.5)
 half = max(1, int(round(half_width_mm / step)))
 x0, x1 = max(0, x_pixel - half), min(mri_view.shape[1], x_pixel + half + 1)
@@ -344,13 +346,13 @@ with neigh2:
     st.markdown("### Reconstructed histology — 200 µm neighbourhood")
     st.image(rgb_with_crosshair(hist_neighbour, x_pixel - x0, z_pixel - z0), use_container_width=True)
 
-st.subheader("Reference MRI → registered detailed section")
+st.subheader("3. Select a registered detailed section")
 st.caption(
     "This optional stage uses the documented reference-space placement for registered section #3458. "
     "The MRI and 200 µm views are sampled at the displayed shared location, while the detailed-section "
     "X/Z selection is made independently on the registered overview. No Labelme files or annotation uploads are required."
 )
-explore_registered = st.checkbox("Explore registered detailed section #3458", value=True, key="explore-registered-3458")
+explore_registered = st.checkbox("Explore available registered section #3458", value=True, key="explore-registered-3458")
 if explore_registered:
     try:
         section, section_bbox, provider, provider_volume, provider_info, provider_scale = registered_context()
@@ -379,7 +381,7 @@ if explore_registered:
         section_display_width = min(900, section_source.width)
         section_display_height = max(1, round(section_source.height * section_display_width / section_source.width))
         section_display = np.asarray(section_source.resize((section_display_width, section_display_height), Image.Resampling.NEAREST))
-        st.markdown("#### Available registered section overview")
+        st.markdown("#### Available section: #3458")
         st.caption(
             f"#3458 · requested overview {OVERVIEW_RESOLUTION_MM:g} mm · actual voxel size "
             f"{[float(value) for value in section_image.header.get_zooms()[:3]]} mm · "
@@ -505,7 +507,7 @@ if explore_registered:
                 "anatomical_review": "Not independently reviewed; reference-space placement does not establish exact MRI correspondence.",
                 "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
             }
-            st.markdown("## Selected detailed tissue patch")
+            st.markdown("## 4. Detailed tissue patch")
             st.success("Bounded real-data patch retrieved from the registered #3458 provider.")
             st.markdown(
                 f"**Actual returned pixel size: {detailed_patch.shape[2]} × {detailed_patch.shape[0]} pixels (X × Z plane)**  "

@@ -56,7 +56,8 @@ MRI = VolumeSpec("donor MRI", ROOT / "outputs/spatial_feasibility/mri_to_blk_ali
 HIST = VolumeSpec("native histology", ROOT / "outputs/spatial_feasibility/full8_200um_optbal.nii.gz")
 
 st.set_page_config(page_title="BigBrain TissueLink — Alignment review", layout="wide")
-st.title("BigBrain TissueLink — Alignment review")
+st.title("BigBrain TissueLink")
+st.caption("Alignment review · advanced")
 st.caption("Advanced validation page — independent MRI/histology point pairs")
 st.warning(
     "Validation only. This page records independently selected points; it does not estimate registration accuracy, "
