@@ -76,11 +76,21 @@ Affine coordinates are voxel centres. The edge extent is half a voxel beyond the
 
 Open `outputs/ui_export/bigbrain_crop.nii.gz` or the NIfTI extracted from another bundle in ITK-SNAP (`itksnap path/to/bigbrain_crop.nii.gz`) or 3D Slicer. Use the NIfTI world coordinates as the `bigbrain` / BigBrain microscopic template (histology) coordinate space; do not interpret them as patient MRI or MNI coordinates. The affine maps voxel centres in array x/y/z order, with y representing section thickness. Compare the displayed x/z location and bounds to `metadata.json`; the PNG is only a contrast-adjusted visualization. This procedure is documented for reproducibility but was not executed in an independent viewer in this validation run.
 
-## BigBrain Scout comparison
+## Related-tool scope note
 
-The current public Scout repository reviewed was [esreekarreddy/scout](https://github.com/esreekarreddy/scout), README at [README.md](https://github.com/esreekarreddy/scout/blob/main/README.md), current tree reviewed at commit `f3f943504337e253cc047fcdf67c1e0b7eebe219`. Its README and implementation describe a Next.js/TypeScript verification layer for AI-written code: specialist scouts, judge findings, evidence packs/graphs, patch tournament, execution gates, MCP tools, and GitHub-repository review. Relevant implementation areas include `src/app/api/review/route.ts`, `src/app/api/fix/route.ts`, and `src/components/scout/`.
+The previously cited Scout repository was an unrelated AI code-review
+project and was not a BigBrain comparison. It has been removed from this
+record. A public BigBrain-specific Scout repository could not be
+verified from the public sources searched for this documentation update, so
+this project makes no Scout overlap or novelty claim.
 
-There is overlap only at a high level: both projects emphasize bounded, evidence-backed verification and explicit reporting. BigBrain Cutout is a separate local Python/Streamlit data-retrieval tool that uses siibra to fetch a bounded histological image, maps a rectangle through an affine, preserves raw voxel values, and emits a spatial NIfTI plus provenance ZIP. Scout does not appear to implement BigBrain section discovery, histology crop retrieval, affine/voxel-bound reporting, or NIfTI export. This is a scope comparison, not a novelty claim; interface appearance alone is not evidence of originality.
+The verified upstream tools relevant to this project are
+[siibra-python](https://github.com/FZJ-INM1-BDA/siibra-python), which supplies
+BigBrain metadata and bounded provider access, and
+[BigBrainWarp](https://github.com/caseypaquola/BigBrainWarp), which is a
+separate external-MRI transformation project and is not required by the
+current app. TissueLink is a local Streamlit patch-retrieval and collection
+tool; similar interface elements are not evidence of unique functionality.
 
 ## Limitations
 
@@ -157,13 +167,21 @@ so manual collection observations, raw NIfTI comparison, and two-section
 browser collection verification remain unperformed.
 
 The collection's unmarked PNG is the display-only selected y plane transposed
-for viewing (`display horizontal = source z`, `display vertical = source x`)
-at its native pixel dimensions; it has no crosshair, footprint, orientation
-labels, scale bar, or display enlargement. Its intensity is the existing
-1st–99th percentile linear uint8 visualization conversion from `display_plane`;
-the raw NIfTI values are unchanged. Pixel `(u, v)` maps to source voxel
-`(x, y, z)` as `(v, selected_y, u)` using the section affine and voxel-centre
-convention recorded in each patch metadata file.
+for viewing at its native pixel dimensions; it has no crosshair, footprint,
+orientation labels, scale bar, or display enlargement. Its intensity is the
+existing 1st–99th percentile linear uint8 visualization conversion from
+`display_plane`; the raw NIfTI values are unchanged. For a scientific array
+in NIfTI `(x, y, z)` order, the canonical mapping is
+`PNG[v,u] = data[u, selected_y, v]`: PNG columns are source X, PNG rows are
+source Z, and pixel `(u,v)` maps to source voxel
+`(u, selected_y, v)`. Applying the exported NIfTI affine to that voxel centre
+gives its world coordinate. This PNG mapping is separate from the interactive
+section-display mapping and is recorded explicitly in each patch metadata
+file.
+
+Historical note: earlier validation text described `(v, selected_y, u)` and
+was superseded by the asymmetric-pixel regression. That convention is not
+used by current exports.
 
 ## Selection synchronization follow-up
 
@@ -184,7 +202,7 @@ neighbourhood renderer. The non-square RGB overlay test exercises the actual
 marker renderer and confirms that horizontal and vertical lines use display
 `(u, v)` columns and rows.
 
-The current automated run reports **50 passed**. Geometry, display and
+The current automated run reports **51 passed**. Geometry, display and
 collection tests include synthetic fixtures and are software checks, not
 anatomical validation. Real provider checks are recorded separately below.
 
@@ -193,6 +211,15 @@ shared browser connector did not return a usable page snapshot; visual marker
 agreement remains pending manual confirmation.
 
 ### Patch collection status
+
+Evidence is versioned by artifact and is not interchangeable:
+
+| Artifact/version | Result |
+| --- | --- |
+| Earlier two-section browser ZIP | Independently inspected; both patch identities, manifest/file checksums and NIfTI geometry passed. This is historical evidence for that earlier download. |
+| Later corrected one-section ZIP | Independently inspected for real #3458; corrected PNG mapping, dimensions, affine and checksum checks passed. |
+| Latest browser #3458 run | Fetch and **Add patch to collection** were observed in the app. |
+| Latest two-section browser collection download | Not completed; no claim is made for a current two-section browser ZIP. |
 
 The current collection implementation preserves entries across section
 changes within one Streamlit session, rejects duplicate IDs, enforces a 50 MiB

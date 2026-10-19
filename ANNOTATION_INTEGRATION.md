@@ -33,7 +33,7 @@ The fixture was generated without downloading anything new from the existing val
 - selected source plane: `y=1`, `data[:, 1, :]`, the tissue-containing plane
 - NIfTI shape: `(251, 2, 251)`; raw plane shape `(251, 251)` for `(x,z)`
 - annotation image: `bigbrain_crop_y1_raw.png`, shape `(251,251)` as `(rows,columns)`
-- exact mapping: annotation pixel `(u,v)` maps to NIfTI voxel `(i_x=v, i_y=1, i_z=u)`; this is a transpose only, with no flip
+- exact mapping: annotation pixel `(u,v)` maps to NIfTI voxel `(i_x=u, i_y=1, i_z=v)`; this is a transpose only, with no flip
 - raw values: unchanged `uint8`; no contrast adjustment, resize, or orientation metadata is applied to the annotation image
 
 The asymmetric example polygon is stored in Labelme’s native JSON as:
@@ -75,7 +75,7 @@ The raw PNG is scientific-value preserving for this uint8 plane, but the NIfTI r
 1. Add an “Import annotations” page that accepts Labelme JSON plus the matching raw 2D PNG, or a JSON sidecar linked to a known exported bundle.
 2. Verify image dimensions, selected y-plane, section ID, and a checksum of the referenced image before rendering anything.
 3. Parse only `shape_type="polygon"`; validate finite vertices and bounds; draw the pixel overlay without resampling.
-4. Map `(u,v)` to `(i_x=v,i_y=selected_plane,i_z=u)` using the recorded transpose/flip contract, then show the polygon over the crop and its location on the overview.
+4. Map `(u,v)` to `(i_x=u,i_y=selected_plane,i_z=v)` using the recorded transpose/flip contract, then show the polygon over the crop and its location on the overview.
 5. Export the original Labelme JSON plus a project mapping report. Only emit physical vertices after the plane/affine mapping has been independently verified; do not claim registered 3D coordinates.
 
 This plan deliberately excludes multiple tool formats, automatic segmentation, region search, and anatomical registration.

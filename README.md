@@ -2,12 +2,12 @@
 
 ![BigBrain TissueLink logo](assets/bigbrain-tissuelink-logo.png)
 
-BigBrain TissueLink is a local research tool for exploring the public BigBrain donor MRI alongside reconstructed histology. It helps a researcher navigate to one documented registered section, inspect a bounded detailed tissue patch, and export the image with spatial metadata and provenance.
+BigBrain TissueLink is a local research tool for exploring the public BigBrain donor MRI alongside reconstructed histology. It lets researchers navigate to a documented registered section, inspect bounded detailed tissue patches, collect patches across a session, and export them with spatial metadata and provenance.
 
 ## Workflow
 
 ```text
-reference MRI → registered histology section → patch selection → export
+reference MRI → registered histology section → patch selection → patch collection → export
 ```
 
 The workflow uses reference data from one donor. It is for spatial inspection, not patient MRI, diagnosis, registration, or anatomical validation.
@@ -133,7 +133,7 @@ The viewer uses documented final-histological-space reference coordinates. Match
 
 ## Current verification status
 
-- Automated suite: **50 tests passed** in the latest run. The geometry,
+- Automated suite: **51 tests passed** in the latest run. The geometry,
   collection and renderer regressions use synthetic fixtures; they do not
   replace anatomical review.
 - Real provider evidence includes bounded detailed retrieval for #3458 and
@@ -158,7 +158,7 @@ The verified detailed source is the [EBRAINS record for section #3458](https://s
 
 ## Reused software and attribution
 
-The project reuses [siibra-python](https://github.com/FZJ-INM1-BDA/siibra-python) for BigBrain section metadata, bounded provider fetches, and NIfTI geometry. [BigBrainWarp](https://github.com/caseypaquola/BigBrainWarp) is documented as a separate external MRI-transform dependency and is not required for the current app. Data come from the [BigBrain Project](https://bigbrainproject.org/). Related-project overlap, including Scout, is discussed in [VALIDATION.md](VALIDATION.md); this project makes no interface-based novelty claim.
+The project reuses [siibra-python](https://github.com/FZJ-INM1-BDA/siibra-python) for BigBrain section metadata, bounded provider fetches, and NIfTI geometry. [BigBrainWarp](https://github.com/caseypaquola/BigBrainWarp) is documented as a separate external MRI-transform dependency and is not required for the current app. Data come from the [BigBrain Project](https://bigbrainproject.org/). Related-tool scope notes are recorded in [VALIDATION.md](VALIDATION.md); this project makes no interface-based novelty claim.
 
 BigBrain data terms and attribution requirements are separate from the MIT license for original project code. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSE](LICENSE). Use the [bug-report template](.github/ISSUE_TEMPLATE/bug_report.md) for reproducible software issues; do not upload patient data, credentials, or unlicensed images.
 
