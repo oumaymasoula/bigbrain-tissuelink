@@ -40,8 +40,16 @@ from registered_section_demo import (
     add_rect,
 )
 from display_utils import _display_grayscale, has_intensity_variation, rgb_with_crosshair
-from patch_collection import COLLECTION_MAX_BYTES, add_entry, collection_bytes, collection_zip_bytes, patch_id_for
+from patch_collection import COLLECTION_MAX_BYTES, add_entry, annotation_plane_from_image, collection_bytes, collection_zip_bytes, patch_id_for
 from selection_sync import invalidate_current_selection, selection_sync_report
+from region_navigation import (
+    VERIFIED_SECTION_INTERSECTIONS,
+    central_nonzero_display_pixel,
+    fetch_region_mask_plane,
+    mask_plane_intersects,
+    region_catalogue_entry,
+    sample_mask_to_section_display,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -307,6 +315,10 @@ if st.session_state.get("selected_registered_section_id") != selected_section_id
     if "selected_registered_section_id" in st.session_state:
         invalidate_current_selection(st.session_state)
         st.session_state.pop("volume_viewer_last_section_click", None)
+        st.session_state.pop("region_mask_image", None)
+        st.session_state.pop("region_mask_metadata", None)
+        st.session_state.pop("region_mask_display", None)
+        st.session_state.pop("region_mask_display_metadata", None)
     st.session_state.selected_registered_section_id = selected_section_id
     # Section selection is an explicit navigation action: align both reference
     # views to the documented section plane before rendering them.
@@ -368,9 +380,6 @@ if st.button(f"Align reference views to section #{selected_section_number} plane
         st.rerun()
     except Exception as exc:
         st.error(f"Could not navigate to registered section #{selected_section_number}: {exc}")
-if st.session_state.get("registered_navigation_active"):
-    st.caption(f"Reference plane aligned to registered section #{selected_section_number} at documented Y≈{st.session_state.world_y_slice:.4f} mm.")
-
 with st.expander("Advanced · display controls", expanded=False):
     st.caption("These controls affect navigation and visualization only; exported scientific values are unchanged.")
     world_y = st.slider("Reference slice Y (mm)", float(common["min"][1]), float(common["max"][1]), step=0.2, key="world_y_slice")
@@ -413,6 +422,20 @@ with st.expander("Advanced · display controls", expanded=False):
 active_selection_world = st.session_state.get("current_section_selection_world")
 if active_selection_world is not None and len(active_selection_world) == 3:
     x_world, world_y, z_world = (float(value) for value in active_selection_world)
+
+if st.session_state.get("registered_navigation_active"):
+    selected_plane_y = float(selected_catalogue["section_plane_y_mm"])
+    if abs(float(world_y) - selected_plane_y) <= 1e-6:
+        st.caption(
+            f"Reference views aligned to registered section #{selected_section_number}: "
+            f"documented plane Y≈{selected_plane_y:.4f} mm; displayed slice centre Y={float(world_y):.4f} mm."
+        )
+    else:
+        st.warning(
+            f"Reference views are currently sampled at Y={float(world_y):.4f} mm, while section "
+            f"#{selected_section_number} is at documented Y≈{selected_plane_y:.4f} mm. "
+            f"Click ‘Align reference views to section #{selected_section_number} plane’ before using the linked views."
+        )
 
 mri_view, hist_view, x_axis, z_axis = plane_views(world_y, common["min"][0], common["max"][0], common["min"][2], common["max"][2], step, contrast_low, contrast_high)
 x_pixel = int(np.clip(round((x_world - x_axis[0]) / step), 0, len(x_axis) - 1))
@@ -542,6 +565,87 @@ if explore_registered:
         section_display_width = max(1, round(section_source.width * fit_scale))
         section_display_height = max(1, round(section_source.height * fit_scale))
         section_display = np.asarray(section_source.resize((section_display_width, section_display_height), Image.Resampling.NEAREST))
+        with st.expander("Optional · atlas region navigation", expanded=False):
+            region_info = region_catalogue_entry()
+            st.caption(
+                f"Supported region: {region_info['region']} · {region_info['parcellation']} · "
+                f"space: {region_info['space']} · threshold: {region_info['threshold']}"
+            )
+            st.caption(
+                "This is an experimental geometry diagnostic. A finite-Y slab overlap is not "
+                "an exact-plane intersection or a validated tissue-targeting overlay."
+            )
+            verified_rows = [
+                {
+                    "section": f"#{number}",
+                    "plane Y (mm)": values["plane_y_mm"],
+                    "nonzero mask voxels": values["nonzero_mask_voxels"],
+                    "status": "nonzero finite-Y slab; exact-plane audit required",
+                }
+                for number, values in VERIFIED_SECTION_INTERSECTIONS.items()
+            ]
+            st.dataframe(verified_rows, use_container_width=True, hide_index=True)
+            st.caption("Only these sections have bounded mask-slab evidence for this region; other catalogue sections are untested.")
+            if st.button("Check selected section against region mask", key="check-region-mask"):
+                try:
+                    with st.spinner("Fetching bounded atlas mask plane…"):
+                        region_mask, region_metadata = fetch_region_mask_plane(
+                            region_info["region"], section_y,
+                        )
+                    st.session_state.region_mask_image = region_mask
+                    st.session_state.region_mask_metadata = {
+                        **region_metadata,
+                        "section_id": selected_section_id,
+                        "section_number": selected_section_number,
+                    }
+                    exact_mask_display, exact_metadata = sample_mask_to_section_display(
+                        region_mask,
+                        section_image,
+                        section_y,
+                        (section_display_height, section_display_width),
+                    )
+                    st.session_state.region_mask_display = exact_mask_display
+                    st.session_state.region_mask_display_metadata = exact_metadata
+                except Exception as exc:
+                    st.error(f"Region-mask provider check failed: {exc}")
+            region_mask = st.session_state.get("region_mask_image")
+            region_metadata = st.session_state.get("region_mask_metadata")
+            if region_metadata and region_metadata.get("section_id") == selected_section_id and region_mask is not None:
+                if mask_plane_intersects(region_mask):
+                    exact_metadata = st.session_state.get("region_mask_display_metadata", {})
+                    exact_mask_display = st.session_state.get("region_mask_display")
+                    exact_count = int(exact_metadata.get("exact_plane_nonzero_pixels", 0))
+                    st.info(
+                        f"The bounded mask slab contains {region_metadata['mask_nonzero_voxels']:,} nonzero voxels. "
+                        f"Exact section-plane sampling finds {exact_count:,} display pixels. "
+                        "Slab overlap is not exact-plane intersection."
+                    )
+                    if exact_mask_display is not None and exact_count:
+                        selected_mask_pixel = central_nonzero_display_pixel(exact_mask_display)
+                        st.warning(
+                            "Atlas overlay display is paused: the exact-plane mask still reaches "
+                            "background-like overview pixels. The clean section overview below remains "
+                            "unmarked; this mask must not be used to choose a tissue patch."
+                        )
+                        if selected_mask_pixel is not None:
+                            st.caption(
+                                f"Numerical diagnostic only · example actual nonzero mask pixel: display UV={selected_mask_pixel}. "
+                                "The saved red diagnostic is evidence for review, not a tissue-targeting overlay."
+                            )
+                    else:
+                        st.warning(
+                            "The mask slab overlaps this section's Y neighbourhood, but exact-plane sampling "
+                            "found no nonzero pixels. No region-targeted patch is implied."
+                        )
+                    st.caption(
+                        f"Mask actual resolution: {region_metadata['actual_resolution_mm']} mm; "
+                        "categorical sampling used both full affines on the exact documented section plane."
+                    )
+                else:
+                    st.warning(
+                        f"No nonzero region-mask voxels were found on section #{selected_section_number}'s bounded plane. "
+                        "No region-targeted patch is implied."
+                    )
         st.markdown(f"#### Choose a detailed patch location in section #{selected_section_number}")
         st.caption(
             f"#{selected_section_number} · requested overview {OVERVIEW_RESOLUTION_MM:g} mm · actual voxel size "
@@ -734,6 +838,9 @@ if explore_registered:
             detailed_patch, detailed_section, actual_bounds, selected_point = registered_patch_state
             detailed_display_raw, detailed_display_mapping = section_display_array(detailed_patch)
             patch_source = Image.fromarray(detailed_display_raw)
+            annotation_plane, annotation_mapping = annotation_plane_from_image(
+                detailed_patch, slice_index=detailed_display_mapping["slice_index"]
+            )
             detailed_zooms = [float(value) for value in detailed_patch.header.get_zooms()[:3]]
             detail_zoom = st.slider("Detailed patch display enlargement (visual only)", 1.0, 4.0, 2.0, 0.25, key="volume-viewer-detail-zoom")
             patch_display = np.asarray(patch_source.resize((max(1, round(patch_source.width * detail_zoom)), max(1, round(patch_source.height * detail_zoom))), Image.Resampling.NEAREST))
@@ -759,10 +866,18 @@ if explore_registered:
                     "max_y_mm": float(section_bbox.maxpoint[1]),
                 },
                 "selected_location": selected_point,
-                "sampled_voxel_centres": {
+                "section_plane_probe_centres": {
                     "mri": mri_section_center.tolist(),
                     "histology_200um": hist_section_center.tolist(),
-                    "detailed_section_first_voxel": np.asarray(detailed_patch.affine[:3, 3], dtype=float).tolist(),
+                    "description": "nearest voxel centres at the documented section-plane probe, retained for provenance",
+                },
+                "selected_patch_world_point": {
+                    "requested_world_xyz_mm": [float(value) for value in selected_point["world_xyz_mm"]],
+                    "mri_voxel_index_xyz": np.asarray(nearest_voxel_for_world(mri, np.asarray(selected_point["world_xyz_mm"]))[0], dtype=int).tolist(),
+                    "mri_voxel_centre_mm": nearest_voxel_for_world(mri, np.asarray(selected_point["world_xyz_mm"]))[1].tolist(),
+                    "histology_200um_voxel_index_xyz": np.asarray(nearest_voxel_for_world(hist, np.asarray(selected_point["world_xyz_mm"]))[0], dtype=int).tolist(),
+                    "histology_200um_voxel_centre_mm": nearest_voxel_for_world(hist, np.asarray(selected_point["world_xyz_mm"]))[1].tolist(),
+                    "detailed_section_first_voxel_centre_mm": np.asarray(detailed_patch.affine[:3, 3], dtype=float).tolist(),
                 },
                 "requested_bounds_mm": list(actual_bounds.__dict__.values()),
                 "requested_resolution_mm": float(registered_resolution),
@@ -782,12 +897,27 @@ if explore_registered:
                     "overview_to_reference": "provider affine; no display flip or extra registration",
                     "interpolation": "none for detailed export; display planes are independently sampled",
                     "display": detailed_display_mapping,
+                    "annotation_png": annotation_mapping,
                 },
+                "annotation_png_mapping": annotation_mapping,
                 "raw_values_preserved": True,
                 "source_array_sha256": hashlib.sha256(np.asanyarray(detailed_patch.dataobj).tobytes(order="C")).hexdigest(),
                 "exported_nifti_sha256": sha256_bytes(detailed_nifti),
                 "anatomical_review": "Not independently reviewed; reference-space placement does not establish exact MRI correspondence.",
                 "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
+            }
+            detailed_metadata["region_provenance"] = {
+                **region_info,
+                "selected_section_region_check": (
+                    dict(region_metadata)
+                    if region_metadata and region_metadata.get("section_id") == selected_section_id
+                    else {
+                        "status": "not checked in this session",
+                        "section_id": selected_section_id,
+                        "section_number": selected_section_number,
+                    }
+                ),
+                "anatomical_status": "mask intersection supports navigation only; not anatomical validation",
             }
             st.markdown("## 5. Review and export the detailed patch")
             st.success(f"Bounded real-data patch retrieved from the registered #{selected_section_number} provider.")
@@ -823,7 +953,7 @@ if explore_registered:
                     "user_note": collection_note,
                     "metadata": {**detailed_metadata, "collection_patch_id": collection_patch_id},
                     "raw_nifti": detailed_nifti,
-                    "unmarked_png": png_bytes(np.asarray(patch_source)),
+                    "unmarked_png": png_bytes(annotation_plane),
                     "marked_png": png_bytes(patch_display),
                 }
                 try:

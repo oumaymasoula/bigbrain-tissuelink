@@ -1,0 +1,37 @@
+{
+  "status": "awaiting independent reviewer input",
+  "section_id": "73c1fa55-d099-4854-8cda-c9a403c6080a--4427460c6af460478c6ce4cdb0264126",
+  "reference_space": "BigBrain microscopic template (histology) / shared world-coordinate inspection grid",
+  "source_images": {
+    "registered_overview": "outputs/geometry_diagnostic/registered_clean_world_grid.png",
+    "histology_200um": "outputs/geometry_diagnostic/histology_clean_world_grid.png"
+  },
+  "landmarks": [
+    {
+      "name": "landmark_1",
+      "observation": null,
+      "registered_overview": {"pixel_uv": null, "world_xyz_mm": null},
+      "histology_200um": {"pixel_uv": null, "world_xyz_mm": null},
+      "pairwise_discrepancy_mm": null,
+      "review_status": "unreviewed"
+    },
+    {
+      "name": "landmark_2",
+      "observation": null,
+      "registered_overview": {"pixel_uv": null, "world_xyz_mm": null},
+      "histology_200um": {"pixel_uv": null, "world_xyz_mm": null},
+      "pairwise_discrepancy_mm": null,
+      "review_status": "unreviewed"
+    },
+    {
+      "name": "landmark_3",
+      "observation": null,
+      "registered_overview": {"pixel_uv": null, "world_xyz_mm": null},
+      "histology_200um": {"pixel_uv": null, "world_xyz_mm": null},
+      "pairwise_discrepancy_mm": null,
+      "review_status": "unreviewed"
+    }
+  ],
+  "discrepancy_definition": "Euclidean distance between independently recorded world XYZ points, in mm; not a whole-brain accuracy score",
+  "anatomical_validation": "not performed"
+}

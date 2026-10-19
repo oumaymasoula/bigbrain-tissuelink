@@ -20,7 +20,7 @@ The workflow uses reference data from one donor. It is for spatial inspection, n
 | Native scientific NIfTI plus visual PNG and JSON provenance | Anatomically validated correspondence |
 | Optional in-app polygon annotation and Legacy/Labelme import | Region-name search or segmentation |
 
-The displayed reference volumes are MRI at approximately **0.444 mm** and reconstructed histology at **200 µm**; the latter does not resolve individual cells. The demonstrated #3458 detailed request asks for `0.01 mm` and currently returns approximately `[0.008, 0.020, 0.008] mm` with shape `(251, 2, 251)`. Requested and actual resolutions are shown separately in the app and export metadata.
+The displayed reference volumes are MRI at approximately **0.444 mm** and reconstructed histology at **200 µm**; the latter does not resolve individual cells. A verified #3458 detailed request asks for `0.01 mm` and the preserved collection export returns `[0.008, 0.020, 0.008] mm` with shape `(251, 1, 251)`. Provider thickness/padding can vary by request; requested and actual resolutions are always recorded separately in the app and export metadata.
 
 The detailed section is placed using documented reference-space provider geometry and remains **Not independently reviewed** anatomically. The two y samples in the preserved default crop are retained because the provider returns one source plane plus a zero-filled padding plane; they are not silently squeezed.
 
@@ -131,10 +131,26 @@ The viewer uses documented final-histological-space reference coordinates. Match
 
 ## Current verification status
 
-- Automated suite: **31 tests passed** in the latest run.
-- Initial browser inspection observed section #3458 synchronization to its documented plane near `Y=-0.8595 mm`; the MRI and 200 µm views report their separately sampled slice centres.
-- Reference X/Z to registered-section inverse-geometry mapping and out-of-bounds handling are covered by automated tests.
-- Full browser click → section refinement → provider fetch → downloaded-ZIP inspection remains incomplete. Do not interpret the app as having passed that end-to-end browser check yet.
+- Automated suite: **49 tests passed** in the latest run. The geometry,
+  collection and renderer regressions use synthetic fixtures; they do not
+  replace anatomical review.
+- Real provider evidence includes bounded detailed retrieval for #3458 and
+  bounded metadata/mask checks for #3500. The corrected local collection
+  export currently contains one real #3458 patch; it is not a two-section
+  browser collection.
+- Initial browser inspection observed section #3458 synchronization to its
+  documented plane near `Y=-0.8595 mm`; the MRI and 200 µm views reported
+  separately sampled slice centres. The current browser run did not complete
+  the full two-section click → fetch → collection-download sequence.
+- A browser-downloaded ZIP from that sequence was not available for this
+  checkpoint. Consequently, browser confirmation of #3458 and #3500 as two
+  collected entries remains unperformed. Do not interpret file-integrity
+  checks or provider-array equality as anatomical validation.
+
+For a repeatable local fallback, inspect the previously verified real-data
+outputs under `outputs/collection_regenerated/` or `outputs/verified_patch/`.
+Those files are intentionally excluded from Git and are not a substitute for
+running the provider workflow.
 
 The verified detailed source is the [EBRAINS record for section #3458](https://search.kg.ebrains.eu/instances/73c1fa55-d099-4854-8cda-c9a403c6080a). The earlier siibra reports [#704](https://github.com/FZJ-INM1-BDA/siibra-python/issues/704), [#705](https://github.com/FZJ-INM1-BDA/siibra-python/issues/705), and [#706](https://github.com/FZJ-INM1-BDA/siibra-python/issues/706) are documented as historical issue reports, not assumptions about current behaviour.
 

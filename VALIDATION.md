@@ -169,9 +169,29 @@ neighbourhood renderer. The non-square RGB overlay test exercises the actual
 marker renderer and confirms that horizontal and vertical lines use display
 `(u, v)` columns and rows.
 
-The current automated run reports **41 passed**. This is a software and
-display-convention check, not anatomical validation.
+The current automated run reports **49 passed**. Geometry, display and
+collection tests include synthetic fixtures and are software checks, not
+anatomical validation. Real provider checks are recorded separately below.
 
 The browser interaction for this follow-up was not completed because the
 shared browser connector did not return a usable page snapshot; visual marker
 agreement remains pending manual confirmation.
+
+### Patch collection status
+
+The current collection implementation preserves entries across section
+changes within one Streamlit session, rejects duplicate IDs, enforces a 50 MiB
+session budget, and exports raw NIfTI, an unmarked PNG plane, a marked preview,
+per-patch metadata, a CSV manifest and a README. The unmarked PNG is a
+visualization-only 1st–99th percentile conversion of the selected native
+plane. For a source array in `(x, y, z)` order, its exact mapping is
+`PNG[v,u] = data[u, y_slice, v]`; `y_slice`, dimensions, affine and checksums
+are recorded in each patch metadata file.
+
+The automated collection tests use synthetic byte fixtures labelled #3458 and
+#3500. They verify collection bookkeeping and ZIP structure, not provider
+fetches or anatomical correspondence. Real provider evidence exists for a
+bounded #3458 detailed patch and bounded checks around #3500, but the browser
+workflow that collects both sections and inspects its downloaded ZIP remains
+incomplete. Manual observations and automated results must therefore remain
+separate.

@@ -8,8 +8,52 @@ import json
 import zipfile
 from typing import Mapping
 
+import numpy as np
+
 
 COLLECTION_MAX_BYTES = 50 * 1024 * 1024
+
+
+def annotation_plane_from_image(image, slice_index: int = 0) -> tuple[np.ndarray, dict]:
+    """Build the unmarked annotation PNG plane and its independent mapping.
+
+    This is intentionally separate from the interactive registered-section
+    display convention.  Scientific NIfTI data are ``(x, y, z)``; this plane
+    is ``data[:, slice_index, :].T`` so ``PNG[v, u]`` is
+    ``data[u, slice_index, v]``: PNG columns are source X and rows are
+    source Z. Only display normalization is applied.
+    """
+    data = np.asanyarray(image.dataobj)
+    if data.ndim != 3 or not 0 <= int(slice_index) < data.shape[1]:
+        raise ValueError(f"annotation plane requires a 3-D image and valid y slice; got {data.shape}")
+    plane_xz = np.asarray(data[:, int(slice_index), :])
+    finite = plane_xz[np.isfinite(plane_xz)]
+    if finite.size == 0:
+        display = np.zeros(plane_xz.T.shape, dtype=np.uint8)
+        low, high = 0.0, 0.0
+    else:
+        low, high = np.percentile(finite, [1.0, 99.0])
+        if high <= low:
+            low, high = float(finite.min()), float(finite.max())
+        if high <= low:
+            display = np.zeros(plane_xz.T.shape, dtype=np.uint8)
+        else:
+            display = np.clip((plane_xz.astype(np.float32) - low) * 255.0 / (high - low), 0, 255).astype(np.uint8).T
+    return display, {
+        "source_plane_expression": f"data[:,{int(slice_index)},:].T",
+        "source_slice_index_y": int(slice_index),
+        "png_shape_rows_cols": [int(value) for value in display.shape],
+        "png_horizontal_source_axis": "x",
+        "png_vertical_source_axis": "z",
+        "pixel_to_nifti_voxel": "(u, v) -> (u, slice_index_y, v)",
+        "transpose": True,
+        "flip_horizontal": False,
+        "flip_vertical": False,
+        "display_normalization": "independent 1st–99th percentile linear uint8 conversion",
+        "normalization_low": float(low),
+        "normalization_high": float(high),
+        "scientific_values_preserved": True,
+    }
 
 
 def patch_id_for(raw_nifti: bytes, metadata: Mapping) -> str:
@@ -90,6 +134,11 @@ def collection_zip_bytes(collection: Mapping[str, Mapping]) -> bytes:
             "BigBrain TissueLink patch collection\n\n"
             "Each patch contains a raw native-grid NIfTI, an unmarked display plane "
             "for external annotation, a separate marked preview, and metadata.json.\n"
+            "The unmarked plane is the contrast-adjusted data[:,y_slice,:].T view, "
+            "where y_slice is the recorded source slice index: PNG[v,u] comes "
+            "from source data[u,y_slice,v], with columns as source X and rows "
+            "as source Z; see metadata.json "
+            "for the separate PNG-pixel-to-NIfTI mapping.\n"
             "PNG planes are visualization/annotation aids; NIfTI values and affines "
             "are the scientific data. Collection state is session-scoped and is not "
             "saved across browser sessions unless this ZIP is downloaded.\n",
