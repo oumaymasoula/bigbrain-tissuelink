@@ -14,6 +14,21 @@ import numpy as np
 COLLECTION_MAX_BYTES = 50 * 1024 * 1024
 
 
+def manual_patch_region_context(region_info: Mapping) -> dict:
+    """Return atlas context without asserting membership for a manual patch."""
+    return {
+        "patch_region_membership": "not established",
+        "atlas_context": {
+            "parcellation": region_info.get("parcellation"),
+            "region": region_info.get("region"),
+            "coordinate_space": region_info.get("space"),
+            "probability_threshold": region_info.get("threshold"),
+            "status": "context only; membership not established",
+            "diagnostic_status": "unresolved atlas overlay diagnostics are separate and are not used for manual patch attribution",
+        },
+    }
+
+
 def annotation_plane_from_image(image, slice_index: int = 0) -> tuple[np.ndarray, dict]:
     """Build the unmarked annotation PNG plane and its independent mapping.
 

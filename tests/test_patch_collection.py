@@ -7,7 +7,7 @@ import pytest
 import nibabel as nib
 import numpy as np
 
-from patch_collection import add_entry, annotation_plane_from_image, collection_bytes, collection_zip_bytes, patch_id_for
+from patch_collection import add_entry, annotation_plane_from_image, collection_bytes, collection_zip_bytes, manual_patch_region_context, patch_id_for
 from volume_alignment import voxel_center_world
 
 
@@ -52,6 +52,19 @@ def test_annotation_png_mapping_records_nonzero_y_slice():
     assert mapping["pixel_to_nifti_voxel"] == "(u, v) -> (u, slice_index_y, v)"
     assert data[1, 2, 4] == 124
     assert display[4, 1] > display[0, 0]
+
+
+def test_manual_patch_region_context_does_not_assert_membership():
+    context = manual_patch_region_context({
+        "parcellation": "Example atlas",
+        "region": "Example region",
+        "space": "BigBrain",
+        "threshold": 0.5,
+    })
+    assert context["patch_region_membership"] == "not established"
+    assert context["atlas_context"]["status"] == "context only; membership not established"
+    assert "selected_section_region_check" not in context
+    assert "unresolved atlas overlay diagnostics" in context["atlas_context"]["diagnostic_status"]
 
 
 def _entry(section_id: str, value: bytes):

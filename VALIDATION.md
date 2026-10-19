@@ -127,6 +127,21 @@ The Labelme import parser has automated checks for the existing mapping fixture,
 
 ## Patch collection milestone
 
+### Atlas context versus patch membership
+
+Ordinary manually selected patches do **not** receive automatic anatomical
+region attribution. Their metadata contains
+`patch_region_membership: "not established"` and, separately, an
+`atlas_context` object naming the currently supported parcellation/region as
+context only. This context is not a claim that the selected pixels belong to
+that region, and user notes are not interpreted as anatomical labels.
+
+The unresolved atlas mask-overlay work remains in the separate experimental
+region-navigation diagnostics. It is not used to label manual patches and
+does not change patch selection, raw values, affines, or collection export.
+The nonzero-pixel and file-integrity checks in that diagnostic are numerical
+checks only; they are not anatomical validation.
+
 The new collection tests in `tests/test_patch_collection.py` use synthetic
 byte fixtures labelled as sections `3458` and `3500`. They validate deterministic
 IDs, duplicate rejection, removal, the 50 MiB budget, per-patch metadata,

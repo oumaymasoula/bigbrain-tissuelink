@@ -40,7 +40,7 @@ from registered_section_demo import (
     add_rect,
 )
 from display_utils import _display_grayscale, has_intensity_variation, rgb_with_crosshair
-from patch_collection import COLLECTION_MAX_BYTES, add_entry, annotation_plane_from_image, collection_bytes, collection_zip_bytes, patch_id_for
+from patch_collection import COLLECTION_MAX_BYTES, add_entry, annotation_plane_from_image, collection_bytes, collection_zip_bytes, manual_patch_region_context, patch_id_for
 from selection_sync import invalidate_current_selection, selection_sync_report
 from region_navigation import (
     VERIFIED_SECTION_INTERSECTIONS,
@@ -909,19 +909,7 @@ if explore_registered:
                 "anatomical_review": "Not independently reviewed; reference-space placement does not establish exact MRI correspondence.",
                 "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
             }
-            detailed_metadata["region_provenance"] = {
-                **region_info,
-                "selected_section_region_check": (
-                    dict(region_metadata)
-                    if region_metadata and region_metadata.get("section_id") == selected_section_id
-                    else {
-                        "status": "not checked in this session",
-                        "section_id": selected_section_id,
-                        "section_number": selected_section_number,
-                    }
-                ),
-                "anatomical_status": "mask intersection supports navigation only; not anatomical validation",
-            }
+            detailed_metadata.update(manual_patch_region_context(region_info))
             st.markdown("## 5. Review and export the detailed patch")
             st.success(f"Bounded real-data patch retrieved from the registered #{selected_section_number} provider.")
             st.markdown(
