@@ -1,0 +1,11 @@
+{
+  "folders": [
+    {
+      "name": "BigBrain TissueLink",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "window.title": "BigBrain TissueLink — ${activeEditorShort}"
+  }
+}

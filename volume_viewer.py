@@ -40,7 +40,25 @@ from registered_section_demo import (
     add_rect,
 )
 from display_utils import _display_grayscale, has_intensity_variation, rgb_with_crosshair
-from patch_collection import COLLECTION_MAX_BYTES, add_entry, annotation_plane_from_image, collection_bytes, collection_zip_bytes, manual_patch_region_context, patch_id_for
+from patch_collection import COLLECTION_MAX_BYTES, add_entry, annotation_plane_from_image, bind_unmarked_png_metadata, collection_bytes, collection_visual_report_filename, collection_visual_report_html, collection_zip_bytes, manual_patch_region_context, patch_id_for
+from labelme_import import build_import_package, validate_labelme_annotation
+from labelme_coco import build_coco_package
+from collection_replay import replay_collection, reopen_collection
+from collection_ui import render_collection_review, render_start_new_collection
+from section_status import filter_section_status_rows, section_status_rows
+from patch_sampling import (
+    MAX_ESTIMATED_BYTES,
+    MAX_PATCH_COUNT,
+    MAX_REQUEST_COUNT,
+    PatchSizeXZ,
+    RectangleXZ,
+    estimated_bytes_per_patch,
+    footprint_bounds,
+    generate_regular_grid,
+    generate_seeded_random,
+    plan_metadata,
+)
+from patch_statistics import compute_patch_statistics
 from selection_sync import invalidate_current_selection, selection_sync_report
 from region_navigation import (
     VERIFIED_SECTION_INTERSECTIONS,
@@ -53,10 +71,9 @@ from region_navigation import (
 
 
 ROOT = Path(__file__).resolve().parent
-LOGO = ROOT / "assets" / "bigbrain-tissuelink-logo.png"
 MRI = VolumeSpec("donor MRI", ROOT / "outputs/spatial_feasibility/mri_to_blk_aligned.nii.gz")
 HIST = VolumeSpec("native histology", ROOT / "outputs/spatial_feasibility/full8_200um_optbal.nii.gz")
-REGISTERED_NAVIGATION_TARGETS = ("volume_viewer.py", "pages/1_Validation.py")
+REGISTERED_NAVIGATION_TARGETS = ("volume_viewer.py", "pages/1_Validation.py", "pages/2_Experimental_ROI.py")
 
 
 def validate_navigation_targets(root: Path = ROOT) -> None:
@@ -69,8 +86,6 @@ def validate_navigation_targets(root: Path = ROOT) -> None:
 validate_navigation_targets()
 
 st.set_page_config(page_title="BigBrain TissueLink", layout="wide")
-if LOGO.is_file():
-    st.image(str(LOGO), width=460)
 st.markdown(
     """
     <style>
@@ -109,7 +124,7 @@ st.markdown(
     </style>
     <div class="tl-hero">
       <div class="tl-kicker">BigBrain reference anatomy</div>
-      <h1>BigBrain TissueLink</h1>
+      <h1>MRI–Histology Explorer</h1>
       <p>Explore a shared MRI–histology location, choose a registered tissue section, and export a bounded patch with its spatial provenance.</p>
     </div>
     <div class="tl-steps">
@@ -145,6 +160,16 @@ with st.expander("How to use TissueLink", expanded=True):
         Click **Fetch this selected detailed patch**, inspect the returned resolution and bounds, then download the ZIP. The NIfTI contains raw values; PNGs are visualizations.
         """
     )
+
+with st.expander("Advanced features", expanded=False):
+    st.write(
+        "Optional technical tools include alignment review, atlas-context diagnostics, bounded multi-patch sampling, "
+        "descriptive intensity statistics, collection replay, and Labelme/COCO annotation export. These controls do "
+        "not change the primary demonstration path: choose tissue → inspect → collect → export. Unreviewed outputs "
+        "remain explicitly marked and do not establish anatomical correctness."
+    )
+
+render_start_new_collection("manual")
 
 
 @st.cache_resource
@@ -322,6 +347,12 @@ if st.session_state.get("selected_registered_section_id") != selected_section_id
         st.session_state.pop("region_mask_metadata", None)
         st.session_state.pop("region_mask_display", None)
         st.session_state.pop("region_mask_display_metadata", None)
+        for sampler_key in (
+            "sampling_plan",
+            "sampling_results",
+            "sampling_section_id",
+        ):
+            st.session_state.pop(sampler_key, None)
     st.session_state.selected_registered_section_id = selected_section_id
     # Section selection is an explicit navigation action: align both reference
     # views to the documented section plane before rendering them.
@@ -333,6 +364,54 @@ st.markdown(
     f'<span class="tl-status">Section #{selected_section_number} · Y≈{selected_catalogue["section_plane_y_mm"]:.4f} mm · fetch {fetch_status}</span>',
     unsafe_allow_html=True,
 )
+
+with st.expander("Section coverage and evidence status", expanded=False):
+    st.caption(
+        "Informational catalogue only. Discovery, patch-fetch evidence, export-integrity checks and independent anatomical review are separate dimensions. "
+        "A successful patch does not validate an entire section; untested sections remain Unknown."
+    )
+    status_rows = section_status_rows(
+        catalogue,
+        current_fetch_ids=st.session_state.get("registered_fetch_verified_ids", set()),
+        collection=st.session_state.patch_collection,
+    )
+    y_values = [float(row["world_Y_mm"]) for row in status_rows]
+    status_filter = st.selectbox(
+        "Show sections with evidence in",
+        ["All", "Discovered", "Fetch evidence", "Export integrity", "Independent anatomical review"],
+        key="section-status-filter",
+    )
+    y_filter = st.slider(
+        "World Y range (mm)",
+        min_value=float(min(y_values)),
+        max_value=float(max(y_values)),
+        value=(float(min(y_values)), float(max(y_values))),
+        key="section-status-y-range",
+    )
+    filtered_status_rows = filter_section_status_rows(status_rows, status_filter, y_filter)
+    st.caption(f"Showing {len(filtered_status_rows)} of {len(status_rows)} discovered registered sections.")
+    st.dataframe(
+        [
+            {
+                "Section": row["section"],
+                "World Y (mm)": row["world_Y_mm"],
+                "Provider metadata": row["discovered"],
+                "Real fetch evidence": row["fetch_evidence"],
+                "Export integrity": row["export_integrity"],
+                "Independent anatomy review": row["anatomical_review"],
+                "Evidence references": "; ".join(
+                    str(row[key]) for key in (
+                        "discovered_evidence", "fetch_evidence_reference", "export_evidence_reference", "anatomical_review_evidence"
+                    ) if str(row[key]) not in {"No fetch evidence recorded", "No export-integrity evidence recorded", "No independent anatomical review"}
+                ),
+            }
+            for row in filtered_status_rows
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+    with st.expander("Advanced · dates, software versions and exact section IDs", expanded=False):
+        st.dataframe(filtered_status_rows, use_container_width=True, hide_index=True)
 
 with st.expander("Advanced · source and technical metadata", expanded=False):
     st.caption("Sources: official donor MRI `3D_MRI/nii/mri_to_blk_aligned.nii.gz` and native histological-space `full8_200um_optbal.nii.gz`.")
@@ -810,6 +889,206 @@ if explore_registered:
             "it is not a claim of exact tissue correspondence."
         )
 
+        with st.expander("Experimental · sample patches within this rectangle", expanded=False):
+            st.warning(
+                "This samples a geometric rectangle on one registered section; it is not anatomical-region sampling. "
+                "No background filtering is applied, so every requested centre remains in the plan."
+            )
+            st.caption(
+                "Footprints must fit fully inside the rectangle. Overlap is allowed and recorded. "
+                f"The current limits are {MAX_PATCH_COUNT} patches, {MAX_REQUEST_COUNT} requests and "
+                f"{MAX_ESTIMATED_BYTES / (1024 * 1024):g} MiB estimated raw data."
+            )
+            sample_col1, sample_col2 = st.columns(2)
+            with sample_col1:
+                sample_min_x = st.number_input("Rectangle min X (mm)", value=float(requested_section_bounds.min_x), key="sampling-min-x")
+                sample_max_x = st.number_input("Rectangle max X (mm)", value=float(requested_section_bounds.max_x), key="sampling-max-x")
+                sample_width_x = st.number_input("Patch width X (mm)", min_value=0.01, max_value=2.0, value=min(1.0, max(0.01, float(requested_section_bounds.max_x - requested_section_bounds.min_x))), step=0.01, key="sampling-width-x")
+            with sample_col2:
+                sample_min_z = st.number_input("Rectangle min Z (mm)", value=float(requested_section_bounds.min_z), key="sampling-min-z")
+                sample_max_z = st.number_input("Rectangle max Z (mm)", value=float(requested_section_bounds.max_z), key="sampling-max-z")
+                sample_height_z = st.number_input("Patch height Z (mm)", min_value=0.01, max_value=2.0, value=min(1.0, max(0.01, float(requested_section_bounds.max_z - requested_section_bounds.min_z))), step=0.01, key="sampling-height-z")
+            sample_method = st.selectbox("Sampling method", ["Regular grid", "Seeded random"], key="sampling-method")
+            if sample_method == "Regular grid":
+                grid_col1, grid_col2 = st.columns(2)
+                with grid_col1:
+                    sample_spacing_x = st.number_input("Grid spacing X (mm)", min_value=0.01, max_value=10.0, value=1.0, step=0.01, key="sampling-spacing-x")
+                with grid_col2:
+                    sample_spacing_z = st.number_input("Grid spacing Z (mm)", min_value=0.01, max_value=10.0, value=1.0, step=0.01, key="sampling-spacing-z")
+                sample_count = None
+                sample_seed = None
+            else:
+                sample_count = st.number_input("Random patch count", min_value=1, max_value=MAX_PATCH_COUNT, value=4, step=1, key="sampling-count")
+                sample_seed = st.number_input("Random seed", min_value=0, value=3458, step=1, key="sampling-seed")
+                sample_spacing_x = sample_spacing_z = None
+            sample_resolution = st.selectbox("Sampling request resolution (mm)", [0.01, 0.02, 0.1], index=1, key="sampling-resolution")
+            sample_rectangle = RectangleXZ(sample_min_x, sample_min_z, sample_max_x, sample_max_z)
+            sample_size = PatchSizeXZ(sample_width_x, sample_height_z)
+            sample_estimated = estimated_bytes_per_patch(sample_size, sample_resolution, max(0.02, float(section_bbox.maxpoint[1] - section_bbox.minpoint[1])))
+            st.caption(f"Estimated raw bytes per request: {sample_estimated:,}; total is checked before retrieval.")
+            if st.button("Generate sampling plan", key="sampling-generate-plan"):
+                try:
+                    if not (
+                        float(section_bbox.minpoint[0]) <= sample_rectangle.min_x
+                        and sample_rectangle.max_x <= float(section_bbox.maxpoint[0])
+                        and float(section_bbox.minpoint[2]) <= sample_rectangle.min_z
+                        and sample_rectangle.max_z <= float(section_bbox.maxpoint[2])
+                    ):
+                        raise ValueError("sampling rectangle must stay inside the selected section bounds")
+                    if sample_method == "Regular grid":
+                        centres = generate_regular_grid(sample_rectangle, sample_size, sample_spacing_x, sample_spacing_z)
+                        method = "regular_grid"
+                    else:
+                        centres = generate_seeded_random(sample_rectangle, sample_size, int(sample_count), int(sample_seed))
+                        method = "seeded_random"
+                    total_estimated = sample_estimated * len(centres)
+                    if len(centres) > MAX_REQUEST_COUNT or total_estimated > MAX_ESTIMATED_BYTES:
+                        raise ValueError(
+                            f"sampling plan exceeds limits: {len(centres)} requests and {total_estimated:,} estimated bytes"
+                        )
+                    plan = plan_metadata(
+                        method,
+                        sample_rectangle,
+                        sample_size,
+                        centres,
+                        sample_resolution,
+                        seed=int(sample_seed) if sample_seed is not None else None,
+                        spacing_x=sample_spacing_x,
+                        spacing_z=sample_spacing_z,
+                    )
+                    plan.update({
+                        "section_id": selected_section_id,
+                        "section_number": selected_section_number,
+                        "section_plane_y_mm": section_y,
+                        "y_bounds_mm": [float(section_bbox.minpoint[1]), float(section_bbox.maxpoint[1])],
+                        "estimated_bytes_per_patch": sample_estimated,
+                        "estimated_total_bytes": total_estimated,
+                    })
+                    st.session_state.sampling_plan = plan
+                    st.session_state.sampling_results = []
+                    st.session_state.sampling_section_id = selected_section_id
+                    st.success(f"Generated {len(centres)} stored patch centre(s). Review the footprints before retrieval.")
+                except (ValueError, RuntimeError) as exc:
+                    st.error(f"Sampling plan rejected: {exc}")
+
+            sampling_plan = st.session_state.get("sampling_plan")
+            if sampling_plan and sampling_plan.get("section_id") == selected_section_id:
+                sampling_preview = np.asarray(section_display).copy()
+                for centre in sampling_plan["centres_xz_mm"]:
+                    bounds = footprint_bounds(
+                        (float(centre[0]), float(centre[1])),
+                        PatchSizeXZ(**sampling_plan["patch_dimensions_mm"]),
+                        float(section_bbox.minpoint[1]),
+                        float(section_bbox.maxpoint[1]),
+                    )
+                    rect = map_source_bounds_to_preview_rect(
+                        (bounds["min_x"], bounds["min_z"], bounds["max_x"], bounds["max_z"]),
+                        section_image.affine, section_image.shape,
+                        (section_display_width, section_display_height),
+                    )
+                    sampling_preview = add_rect(
+                        sampling_preview,
+                        (int(round(rect["left"])), int(round(rect["top"])), int(round(rect["left"] + rect["width"])), int(round(rect["top"] + rect["height"]))),
+                        colour=(0, 180, 255),
+                    )
+                st.image(sampling_preview, caption="Sampling plan preview — every cyan footprint is a requested patch", use_container_width=True)
+                st.write({
+                    "section_id": sampling_plan["section_id"],
+                    "method": sampling_plan["method"],
+                    "requested_patch_count": sampling_plan["count"],
+                    "stored_centres_xz_mm": sampling_plan["centres_xz_mm"],
+                    "edge_handling": sampling_plan["edge_handling"],
+                    "overlap_policy": sampling_plan["overlap_policy"],
+                    "background_filtering": sampling_plan["background_filtering"],
+                })
+                if st.button("Fetch sampling plan", type="primary", key="sampling-fetch-plan"):
+                    results = []
+                    with st.status("Retrieving bounded sampling patches…", expanded=True) as sampling_status:
+                        for index, centre in enumerate(sampling_plan["centres_xz_mm"]):
+                            bounds_dict = footprint_bounds(
+                                (float(centre[0]), float(centre[1])),
+                                PatchSizeXZ(**sampling_plan["patch_dimensions_mm"]),
+                                sampling_plan["y_bounds_mm"][0], sampling_plan["y_bounds_mm"][1],
+                            )
+                            requested = Bounds(**bounds_dict)
+                            result = {
+                                "index": index,
+                                "centre_xz_mm": [float(centre[0]), float(centre[1])],
+                                "requested_bounds_mm": bounds_dict,
+                            }
+                            try:
+                                sampling_status.write(f"Request {index + 1}/{sampling_plan['count']}")
+                                patch, patch_section, _ = fetch_crop(
+                                    requested,
+                                    resolution_mm=float(sampling_plan["requested_resolution_mm"]),
+                                    max_bytes=MAX_BYTES,
+                                    section_id=selected_section_id,
+                                )
+                                raw = np.asanyarray(patch.dataobj)
+                                result.update({
+                                    "status": "background_only" if not has_intensity_variation(raw) else "retrieved",
+                                    "shape_xyz": [int(value) for value in patch.shape],
+                                    "actual_voxel_size_mm_xyz": [float(value) for value in patch.header.get_zooms()[:3]],
+                                })
+                                if result["status"] == "retrieved":
+                                    raw_nifti = nifti_bytes(patch)
+                                    display_raw, display_mapping = section_display_array(patch)
+                                    annotation, annotation_mapping = annotation_plane_from_image(patch, slice_index=display_mapping["slice_index"])
+                                    descriptive_statistics = compute_patch_statistics(
+                                        raw,
+                                        preferred_y=display_mapping["slice_index"],
+                                        declared_background_values=(255,),
+                                    )
+                                    metadata = {
+                                        "status": "reference_space_placement_not_independently_reviewed",
+                                        "section_id": selected_section_id,
+                                        "section_number": selected_section_number,
+                                        "section_name": selected_section_label,
+                                        "provider_url": selected_catalogue["source_url"],
+                                        "coordinate_space": "BigBrain microscopic template / documented registered-section reference space",
+                                        "requested_bounds_mm": list(requested.__dict__.values()),
+                                        "requested_resolution_mm": float(sampling_plan["requested_resolution_mm"]),
+                                        "actual_shape_xyz": [int(value) for value in patch.shape],
+                                        "actual_voxel_size_mm_xyz": [float(value) for value in patch.header.get_zooms()[:3]],
+                                        "actual_affine": np.asarray(patch.affine).tolist(),
+                                        "source_array_sha256": hashlib.sha256(raw.tobytes(order="C")).hexdigest(),
+                                        "exported_nifti_sha256": sha256_bytes(raw_nifti),
+                                        "sampling_plan": sampling_plan,
+                                        "sampling_centre_xz_mm": [float(centre[0]), float(centre[1])],
+                                        "annotation_png_mapping": annotation_mapping,
+                                        "descriptive_patch_statistics": descriptive_statistics,
+                                        "raw_values_preserved": True,
+                                        "anatomical_review": "Not independently reviewed",
+                                    }
+                                    metadata.update(manual_patch_region_context(region_info))
+                                    patch_id = patch_id_for(raw_nifti, metadata)
+                                    marked_preview = rgb_with_crosshair(
+                                        display_raw,
+                                        display_raw.shape[1] // 2,
+                                        display_raw.shape[0] // 2,
+                                    )
+                                    unmarked_png = png_bytes(annotation)
+                                    collection_metadata = bind_unmarked_png_metadata(
+                                        metadata, patch_id, unmarked_png, annotation.shape
+                                    )
+                                    add_entry(st.session_state.patch_collection, {
+                                        "patch_id": patch_id,
+                                        "user_label": f"sample-{selected_section_number}-{index + 1}",
+                                        "user_note": "Generated by bounded rectangle sampling; not an anatomical-region label.",
+                                        "metadata": collection_metadata,
+                                        "raw_nifti": raw_nifti,
+                                        "unmarked_png": unmarked_png,
+                                        "marked_png": png_bytes(marked_preview),
+                                    })
+                                    result["patch_id"] = patch_id
+                            except Exception as exc:
+                                result.update({"status": "failed", "error": str(exc)})
+                            results.append(result)
+                    st.session_state.sampling_results = results
+                    sampling_status.update(label="Sampling retrieval finished", state="complete")
+                if st.session_state.get("sampling_results"):
+                    st.dataframe(st.session_state.sampling_results, use_container_width=True, hide_index=True)
+
         registered_signature = (tuple(round(value, 6) for value in selected_section_world), float(registered_half_x), float(registered_half_z), float(registered_resolution))
         if st.session_state.get("volume_viewer_registered_signature") != registered_signature:
             st.session_state.pop("volume_viewer_registered_patch", None)
@@ -843,6 +1122,11 @@ if explore_registered:
             patch_source = Image.fromarray(detailed_display_raw)
             annotation_plane, annotation_mapping = annotation_plane_from_image(
                 detailed_patch, slice_index=detailed_display_mapping["slice_index"]
+            )
+            descriptive_statistics = compute_patch_statistics(
+                np.asanyarray(detailed_patch.dataobj),
+                preferred_y=detailed_display_mapping["slice_index"],
+                declared_background_values=(255,),
             )
             detailed_zooms = [float(value) for value in detailed_patch.header.get_zooms()[:3]]
             detail_zoom = st.slider("Detailed patch display enlargement (visual only)", 1.0, 4.0, 2.0, 0.25, key="volume-viewer-detail-zoom")
@@ -903,6 +1187,7 @@ if explore_registered:
                     "annotation_png": annotation_mapping,
                 },
                 "annotation_png_mapping": annotation_mapping,
+                "descriptive_patch_statistics": descriptive_statistics,
                 "raw_values_preserved": True,
                 "source_array_sha256": hashlib.sha256(np.asanyarray(detailed_patch.dataobj).tobytes(order="C")).hexdigest(),
                 "exported_nifti_sha256": sha256_bytes(detailed_nifti),
@@ -927,9 +1212,31 @@ if explore_registered:
                 "estimated_uncompressed_bytes": int(np.asanyarray(detailed_patch.dataobj).nbytes),
             })
             st.image(patch_display, caption=f"Registered detailed section #{selected_section_number} — actual returned resolution {detailed_zooms} mm; visualization contrast only", use_container_width=True)
+            collection_patch_id = patch_id_for(detailed_nifti, detailed_metadata)
+            review_decision, review_reason = "Not recorded", ""
+            with st.expander("Optional · descriptive intensity statistics", expanded=False):
+                st.caption(
+                    "Computed from the raw scientific data plane, excluding declared provider padding value 255. "
+                    "These descriptions are not tissue-quality or anatomical verdicts and do not discard patches."
+                )
+                st.write(descriptive_statistics)
+                review_decision = st.selectbox(
+                    "Your review decision",
+                    ["Not recorded", "Keep", "Exclude"],
+                    key=f"patch-review-decision-{collection_patch_id}",
+                )
+                review_reason = st.text_area(
+                    "Your reason (optional)",
+                    key=f"patch-review-reason-{collection_patch_id}",
+                    help="Record your own decision; this is not an automatic tissue or anatomy classification.",
+                )
+            detailed_metadata["user_review"] = {
+                "decision": review_decision,
+                "reason": review_reason,
+                "interpretation": "user-provided note; not an automatic quality or anatomical label",
+            }
             registered_package = {"raw_nifti": detailed_nifti, "patch_png": png_bytes(patch_display), "footprint_png": png_bytes(hist_footprint), "metadata": detailed_metadata}
             st.download_button("Download registered MRI → section patch package", registered_patch_report_bytes(registered_package), f"registered_section_{selected_section_number}_patch.zip", "application/zip", key="volume-viewer-download-registered")
-            collection_patch_id = patch_id_for(detailed_nifti, detailed_metadata)
             st.markdown("### Add this patch to your collection")
             st.caption(
                 f"Patch ID {collection_patch_id} · collection uses up to {COLLECTION_MAX_BYTES / (1024 * 1024):g} MiB in this browser session. "
@@ -938,13 +1245,16 @@ if explore_registered:
             collection_label = st.text_input("Patch label", value=f"section-{selected_section_number}", key=f"collection-label-{collection_patch_id}")
             collection_note = st.text_area("Patch note (optional; not an anatomical label)", value="", key=f"collection-note-{collection_patch_id}")
             if st.button("Add patch to collection", key=f"collection-add-{collection_patch_id}"):
+                unmarked_png = png_bytes(annotation_plane)
                 collection_entry = {
                     "patch_id": collection_patch_id,
                     "user_label": collection_label.strip() or collection_patch_id,
                     "user_note": collection_note,
-                    "metadata": {**detailed_metadata, "collection_patch_id": collection_patch_id},
+                    "metadata": bind_unmarked_png_metadata(
+                        detailed_metadata, collection_patch_id, unmarked_png, annotation_plane.shape
+                    ),
                     "raw_nifti": detailed_nifti,
-                    "unmarked_png": png_bytes(annotation_plane),
+                    "unmarked_png": unmarked_png,
                     "marked_png": png_bytes(patch_display),
                 }
                 try:
@@ -992,15 +1302,150 @@ if st.session_state.patch_collection:
                 if st.button("Remove this patch", key=f"collection-remove-{patch_id}"):
                     st.session_state.patch_collection.pop(patch_id, None)
                     st.rerun()
-    st.download_button(
-        "Download patch collection (ZIP)",
-        data=collection_zip_bytes(st.session_state.patch_collection),
-        file_name="bigbrain_tissuelink_patch_collection.zip",
-        mime="application/zip",
-        key="collection-download",
-    )
 else:
     st.info("No patches saved yet. Fetch a detailed tissue patch, then choose ‘Add patch to collection’.")
+
+with st.expander("Advanced · import native Labelme polygon", expanded=False):
+    st.caption(
+        "This optional path accepts native Labelme polygon JSON for one exact collection patch. "
+        "Upload the JSON, that patch's metadata.json, and the unchanged unmarked PNG. "
+        "The selected patch ID, PNG checksum, dimensions and mapping must all match."
+    )
+    if not st.session_state.patch_collection:
+        st.info("Fetch and add a detailed patch to the collection before importing a polygon.")
+    else:
+        import_patch_id = st.selectbox(
+            "Collection patch to annotate",
+            list(st.session_state.patch_collection),
+            format_func=lambda patch_id: f"{patch_id} · section {st.session_state.patch_collection[patch_id]['metadata'].get('section_number', '?')}",
+            key="labelme-import-patch-id",
+        )
+        import_entry = st.session_state.patch_collection[import_patch_id]
+        import_metadata = import_entry["metadata"]
+        st.caption(
+            f"Expected PNG: {import_metadata.get('unmarked_png_filename', 'metadata field missing')} · "
+            f"checksum: {str(import_metadata.get('unmarked_png_sha256', 'missing'))[:16]}…"
+        )
+        labelme_json_upload = st.file_uploader("Native Labelme polygon JSON", type=["json"], key="labelme-native-json")
+        labelme_mapping_upload = st.file_uploader("Matching collection metadata.json", type=["json"], key="labelme-native-metadata")
+        labelme_png_upload = st.file_uploader("Exact unmarked collection PNG", type=["png"], key="labelme-native-png")
+        if labelme_json_upload and labelme_mapping_upload and labelme_png_upload:
+            import_signature = (
+                import_patch_id,
+                hashlib.sha256(labelme_json_upload.getvalue()).hexdigest(),
+                hashlib.sha256(labelme_mapping_upload.getvalue()).hexdigest(),
+                hashlib.sha256(labelme_png_upload.getvalue()).hexdigest(),
+            )
+            if st.session_state.get("native_labelme_import_signature") != import_signature:
+                st.session_state.pop("native_labelme_import", None)
+                st.session_state.pop("native_labelme_import_error", None)
+                st.session_state.native_labelme_import_signature = import_signature
+                try:
+                    validated_import = validate_labelme_annotation(
+                        labelme_json_upload.getvalue(),
+                        labelme_mapping_upload.getvalue(),
+                        labelme_png_upload.getvalue(),
+                        image_filename=labelme_png_upload.name,
+                        expected_section_id=str(import_metadata.get("section_id")),
+                        expected_source_url=str(import_metadata.get("provider_url")),
+                        expected_coordinate_space=str(import_metadata.get("coordinate_space")),
+                        expected_patch_id=import_patch_id,
+                    )
+                    st.session_state.native_labelme_import = validated_import
+                except ValueError as exc:
+                    st.session_state.native_labelme_import_error = str(exc)
+            if st.session_state.get("native_labelme_import_error"):
+                st.error(f"Labelme annotation rejected: {st.session_state.native_labelme_import_error}")
+            imported = st.session_state.get("native_labelme_import")
+            if imported:
+                st.success("Polygon accepted for this exact collection patch; user labels are preserved, not interpreted anatomically.")
+                original = imported["image"].convert("L")
+                overlay = original.convert("RGB")
+                draw = ImageDraw.Draw(overlay)
+                for polygon in imported["polygons"]:
+                    points = [tuple(point) for point in polygon["pixel_vertices_xy"]]
+                    draw.polygon(points, outline=(255, 0, 0), width=2)
+                    if points and polygon["label"]:
+                        draw.text(points[0], polygon["label"], fill=(255, 0, 0))
+                st.write({
+                    "patch_id": imported["patch_id"],
+                    "section_id": imported["section_id"],
+                    "annotated_y_plane_index": imported["plane_index"],
+                    "polygon_count": len(imported["polygons"]),
+                    "pixel_to_nifti": "(u,v) -> (i_x=u, i_y=selected_y, i_z=v)",
+                    "external_tool_round_trip": "not yet independently verified",
+                })
+                image_col, overlay_col = st.columns(2)
+                with image_col:
+                    st.image(original, caption="Original unmarked PNG — unchanged", use_container_width=True)
+                with overlay_col:
+                    st.image(overlay, caption="Imported polygon overlay — display only", use_container_width=True)
+                st.download_button(
+                    "Download polygon + labelled mask package",
+                    data=build_import_package(imported),
+                    file_name=f"{import_patch_id}_labelme_polygon_import.zip",
+                    mime="application/zip",
+                    key=f"labelme-import-download-{import_patch_id}",
+                )
+                st.download_button(
+                    "Export COCO instance-segmentation package",
+                    data=build_coco_package(imported, import_entry["raw_nifti"], import_metadata),
+                    file_name=f"{import_patch_id}_labelme_coco.zip",
+                    mime="application/zip",
+                    key=f"labelme-coco-download-{import_patch_id}",
+                    help="COCO stores pixel polygons only; the package also includes the canonical NIfTI and TissueLink metadata.",
+                )
+
+with st.expander("Reopen or re-fetch a collection", expanded=False):
+    st.caption(
+        "Upload a TissueLink collection ZIP to inspect it locally. Reopen never fetches data. "
+        "Re-fetch uses only recorded registered-section IDs and bounded parameters; imported URLs, labels and notes are treated as untrusted metadata."
+    )
+    replay_upload = st.file_uploader(
+        "Collection ZIP",
+        type=["zip"],
+        key="collection-replay-upload",
+        help="Existing pre-manifest exports are read through a compatibility adapter.",
+    )
+    if replay_upload is not None:
+        replay_bytes = replay_upload.getvalue()
+        if st.button("Reopen collection (inspect only)", key="collection-reopen"):
+            try:
+                st.session_state.collection_reopen_report = reopen_collection(replay_bytes)
+                st.session_state.pop("collection_replay_report", None)
+            except ValueError as exc:
+                st.error(f"Collection could not be reopened: {exc}")
+        reopened = st.session_state.get("collection_reopen_report")
+        if reopened:
+            st.write({
+                "manifest_version": reopened["manifest"].get("schema_version"),
+                "compatibility_adapter_used": reopened["legacy_adapter"],
+                "patch_count": len(reopened["manifest"].get("patches", [])),
+                "member_count": reopened["member_count"],
+            })
+            st.dataframe(reopened["reports"], use_container_width=True, hide_index=True)
+            patches = reopened["manifest"].get("patches", [])
+            estimate = sum(int(p.get("request_budget_bytes", MAX_BYTES)) for p in patches)
+            st.info(
+                f"Estimated re-fetch work: {len(patches)} bounded request(s), up to {estimate / (1024 * 1024):.2f} MiB. "
+                "No request is made until you click Re-fetch collection."
+            )
+            if st.button("Re-fetch collection", type="primary", key="collection-refetch"):
+                progress = st.progress(0, text="Starting bounded replay…")
+                try:
+                    reports = replay_collection(
+                        reopened["manifest"],
+                        fetch_crop,
+                        progress=lambda current, total: progress.progress(current / max(total, 1), text=f"Re-fetched {current}/{total} patch(es)"),
+                    )
+                    st.session_state.collection_replay_report = reports
+                except ValueError as exc:
+                    st.error(f"Collection replay was rejected: {exc}")
+                finally:
+                    progress.empty()
+            if st.session_state.get("collection_replay_report"):
+                st.markdown("#### Replay results")
+                st.dataframe(st.session_state.collection_replay_report, use_container_width=True, hide_index=True)
 
 with st.expander("Optional comparison views", expanded=False):
     overlay_opacity = st.slider("Histology opacity in red/cyan overlay", 0.0, 1.0, 0.5, 0.05)
@@ -1089,3 +1534,5 @@ if st.session_state.saved_locations:
     st.download_button("Export location report (ZIP)", data=location_report_bytes(saved), file_name=f"{saved_name}_location_report.zip", mime="application/zip")
 
 st.info("Independent corresponding-point checks, arrow discrepancies, and the 8–10-landmark validation table are on the separate Validation page. This main page answers one question: what is at this shared reference-space location?")
+
+render_collection_review("manual")

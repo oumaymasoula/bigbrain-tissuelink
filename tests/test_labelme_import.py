@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from labelme_import import map_physical_polygon_to_view, validate_labelme_annotation
+from labelme_import import EXPECTED_MAPPING, map_physical_polygon_to_view, validate_labelme_annotation
 
 
 ROOT = Path(__file__).parents[1]
@@ -12,11 +12,12 @@ FIXTURE_DIR = ROOT / "outputs" / "annotation_feasibility"
 
 
 def fixture_bytes():
-    return (
-        (FIXTURE_DIR / "bigbrain_crop_y1_raw.json").read_bytes(),
-        (FIXTURE_DIR / "mapping_report.json").read_bytes(),
-        (FIXTURE_DIR / "bigbrain_crop_y1_raw.png").read_bytes(),
-    )
+    annotation = (FIXTURE_DIR / "bigbrain_crop_y1_raw.json").read_bytes()
+    mapping = json.loads((FIXTURE_DIR / "mapping_report.json").read_text())
+    # The preserved feasibility artifact predates the corrected PNG contract.
+    # Keep it unchanged on disk and adapt only this test input.
+    mapping["annotation_image"]["mapping_contract"] = EXPECTED_MAPPING
+    return annotation, json.dumps(mapping).encode(), (FIXTURE_DIR / "bigbrain_crop_y1_raw.png").read_bytes()
 
 
 def test_labelme_fixture_maps_and_preserves_label():
@@ -32,6 +33,7 @@ def test_labelme_fixture_maps_and_preserves_label():
     assert validated["image"].size == (251, 251)
     assert validated["polygons"][0]["label"] == "fissure_adjacent_tissue_example"
     assert validated["polygons"][0]["nifti_voxel_vertices_xyz"][0] == [170.0, 1, 170.0]
+    assert validated["polygons"][0]["nifti_voxel_vertices_xyz"][1] == [231.0, 1, 181.0]
 
 
 def test_wrong_image_checksum_is_rejected():

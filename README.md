@@ -19,6 +19,8 @@ The workflow uses reference data from one donor. It is for spatial inspection, n
 | Donor MRI and reconstructed histology navigation | Arbitrary participant-MRI upload |
 | 145 metadata-discovered registered sections; demonstrated detailed workflow for **#3458** | Automatic registration |
 | Bounded patch retrieval with request limits | Cellular-resolution claims from the 200 µm volume |
+| Experimental bounded rectangle sampling on one selected section | Multi-section sampling or automatic tiling |
+| Experimental exact-template binary ROI workflow, gated by the verified CerebrA example | Anatomically validated external-MRI registration |
 | Native scientific NIfTI plus visual PNG and JSON provenance | Anatomically validated correspondence |
 | Optional in-app polygon annotation and Legacy/Labelme import | Region-name search or segmentation |
 
@@ -33,6 +35,58 @@ Collection export contains each raw NIfTI, an unmarked PNG plane for external
 annotation, a separate marked preview, per-patch metadata, `manifest.csv` and
 a README. The collection is capped at 50 MiB and is not persistent across a
 browser refresh; download the ZIP to retain it.
+
+The detailed preview also has an optional **descriptive intensity statistics**
+panel. It reports whether the selected raw scientific plane is empty, constant
+or variable; the fraction at explicitly declared provider padding/background
+values; intensity percentiles; integer storage-endpoint saturation; and a
+documented mean-squared four-neighbour Laplacian statistic. These describe
+stored pixels only: they are not tissue-quality, cell-density, tissue-fraction,
+tear, fold or anatomical-validity verdicts. Known provider padding is excluded
+from usable-value calculations, while raw NIfTI values and the affine remain
+unchanged. Users may record their own Keep/Exclude decision and reason; the
+app never discards a patch automatically. Formulas and assumptions are in
+[PATCH_STATISTICS.md](PATCH_STATISTICS.md), and the same record is included in
+per-patch metadata.
+
+The sidebar also exposes **Experimental template ROI**. It begins with
+**Load technically verified CerebrA example**, which verifies preserved input, transformed
+output and bounded-patch checksums without rerunning the historical transform.
+Only then are new uploads enabled. Each binary NIfTI upload requires an
+explicit declaration of the exact ICBM2009c nonlinear symmetric 1 mm template
+and written provenance; matching header geometry alone is insufficient.
+Dimensions, affine, finite/binary values and request limits are checked before
+the digest-pinned BigBrainWarp container runs. Every new run gets a unique
+evidence directory under `outputs/external_roi_runs/` with its input, output,
+manifest, exact command and complete stdout/stderr. The user must inspect both
+placements before section intersection or bounded fetching. Anatomical status
+remains **Awaiting independent review**.
+
+Both tissue-selection routes use the same session collection. Each route ends
+with **Review, save and reopen your collection**, showing patch thumbnails,
+labels and section identities. The timestamped collection ZIP is the scientific
+archive: it contains NIfTI patches, unmarked PNGs and spatial/provenance
+metadata, and it is the supported format for reopening an editable collection
+without re-fetching tissue or rerunning transforms. The timestamped HTML export
+is a self-contained, offline visual report; opening it does not restore an app
+session. Older ZIPs are accepted when their retained scientific files pass
+inspection, with explicit warnings for fields or previews that were not
+recorded historically.
+
+Optional native Labelme polygon import is documented in
+[LABELME_POLYGON_IMPORT.md](LABELME_POLYGON_IMPORT.md). It is an Advanced
+workflow bound to an exact collection patch; the external GUI round trip is
+not yet claimed as completed.
+
+One optional downstream export is available after a valid Labelme import:
+the [Labelme → COCO adapter](LABELME_COCO_ADAPTER.md). COCO contains pixel
+polygons only; each package retains the canonical NIfTI and TissueLink spatial
+metadata beside it. Compatibility with a target COCO application remains
+unverified until opened in that application.
+
+Bounded rectangle sampling is documented in [PATCH_SAMPLING.md](PATCH_SAMPLING.md).
+It previews stored regular-grid or seeded-random centres before retrieval and
+does not claim anatomical-region membership.
 
 ## Install and launch
 
@@ -129,25 +183,39 @@ Location reports similarly separate visual PNGs from native-grid MRI and reconst
 
 The documented real-data milestone, provider issue review, section metadata audit, coordinate conventions, overlap checks, export checks, and browser checks are recorded in [VALIDATION.md](VALIDATION.md). The multi-section catalogue and bounded-fetch verification are in [SECTION_CATALOGUE_VALIDATION.md](SECTION_CATALOGUE_VALIDATION.md). Reference-volume mapping and limitations are in [SPATIAL_MAPPING.md](SPATIAL_MAPPING.md); the registered-section feasibility evidence is in [SECTION_VOLUME_MAPPING_FEASIBILITY.md](SECTION_VOLUME_MAPPING_FEASIBILITY.md). The external MRI execution status is in [EXTERNAL_MRI_EXECUTION_REPORT.md](EXTERNAL_MRI_EXECUTION_REPORT.md).
 
-The viewer uses documented final-histological-space reference coordinates. Matching world coordinates do not guarantee matching anatomy, and no guessed flip, new registration, uncertainty estimate, or cellular-equivalence claim is applied. External participant-MRI upload is not ready because the exact ICBM2009c/BigBrainWarp execution chain has not completed locally.
+The viewer uses documented final-histological-space reference coordinates.
+Matching world coordinates do not guarantee matching anatomy, and no guessed
+flip, new registration, uncertainty estimate, or cellular-equivalence claim is
+applied. The experimental upload is deliberately limited to binary ROIs already
+proven to be on the exact supported ICBM2009c nonlinear symmetric 1 mm template;
+it is not an arbitrary MRI-registration or patient-upload workflow. The pinned
+BigBrainWarp execution chain has completed technically for compatible CerebrA
+masks, but placement remains awaiting independent anatomical review.
 
 ## Current verification status
 
-- Automated suite: **51 tests passed** in the latest run. The geometry,
+- Automated suite: **85 tests passed** in the latest run. The geometry,
   collection and renderer regressions use synthetic fixtures; they do not
   replace anatomical review.
 - Real provider evidence includes bounded detailed retrieval for #3458 and
   bounded metadata/mask checks for #3500. The corrected local collection
   export currently contains one real #3458 patch; it is not a two-section
   browser collection.
-- Initial browser inspection observed section #3458 synchronization to its
-  documented plane near `Y=-0.8595 mm`; the MRI and 200 µm views reported
-  separately sampled slice centres. The current browser run did not complete
-  the full two-section click → fetch → collection-download sequence.
-- A browser-downloaded ZIP from that sequence was not available for this
-  checkpoint. Consequently, browser confirmation of #3458 and #3500 as two
-  collected entries remains unperformed. Do not interpret file-integrity
-  checks or provider-array equality as anatomical validation.
+- Automated Chrome demonstration completed the real section #3458 click,
+  bounded fetch and collection addition; verified the preserved CerebrA
+  example without rerunning its historical transform; fetched and collected
+  the section #3146 ROI patch; executed a compatible right-cuneus transform;
+  and saved independent MRI/histology review points. Two manual-route browser
+  download saves were canceled by Playwright, while the mixed self-contained
+  HTML report download completed. These are technical interaction results, not
+  anatomical validation. See [the demo execution report](demo/execution_report.md).
+- Collection replay was browser-tested with a temporary manifest-bearing
+  #3458 ZIP: upload, read-only reopen, bounded-work estimate, explicit
+  re-fetch, and replay-results table all appeared. This is a one-patch replay
+  check, not two-section collection validation.
+- The bounded sampler controls were browser-checked without retrieval. A fresh
+  real-provider sampling run was blocked by unavailable siibra configuration
+  mirrors in the current session; see [PATCH_SAMPLING.md](PATCH_SAMPLING.md).
 
 For a repeatable local fallback, inspect the previously verified real-data
 outputs under `outputs/collection_regenerated/` or `outputs/verified_patch/`.
@@ -160,8 +228,15 @@ The verified detailed source is the [EBRAINS record for section #3458](https://s
 
 The project reuses [siibra-python](https://github.com/FZJ-INM1-BDA/siibra-python) for BigBrain section metadata, bounded provider fetches, and NIfTI geometry. [BigBrainWarp](https://github.com/caseypaquola/BigBrainWarp) is documented as a separate external MRI-transform dependency and is not required for the current app. Data come from the [BigBrain Project](https://bigbrainproject.org/). Related-tool scope notes are recorded in [VALIDATION.md](VALIDATION.md); this project makes no interface-based novelty claim.
 
+Collection reopening and explicit bounded replay are documented in
+[COLLECTION_REPLAY.md](COLLECTION_REPLAY.md). Reopening is read-only;
+re-fetching requires an explicit action and reports scientific changes
+separately from serialized-file checksum changes.
+
 BigBrain data terms and attribution requirements are separate from the MIT license for original project code. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSE](LICENSE). Use the [bug-report template](.github/ISSUE_TEMPLATE/bug_report.md) for reproducible software issues; do not upload patient data, credentials, or unlicensed images.
 
 ## Planned extensions
 
-Future work may add a completed, verified external-MRI transform chain and additional registered sections. Those extensions require documented transforms and independent anatomical review; they are not part of the current implementation.
+Future work may add independently reviewed ROI placement, broader template
+support and additional registered sections. Those extensions require explicit
+template provenance, documented transforms and independent anatomical review.

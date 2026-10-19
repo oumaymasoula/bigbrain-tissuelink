@@ -106,11 +106,11 @@ def main() -> None:
             "filename": raw_png.name,
             "sha256": hashlib.sha256(raw_png.read_bytes()).hexdigest(),
             "pixel_values_unchanged": bool(np.array_equal(annotation_pixels, source_plane_xz.T)),
-            "mapping": "annotation pixel (u, v) -> NIfTI voxel index (i_x=v, i_y=1, i_z=u); transpose only, no flip",
+            "mapping": "annotation pixel (u, v) -> NIfTI voxel index (i_x=u, i_y=1, i_z=v); transpose only, no flip",
             "mapping_contract": {
                 "annotation_pixel_order": ["u", "v"],
                 "nifti_index_order": ["i_x", "i_y", "i_z"],
-                "formula": {"i_x": "v", "i_y": "selected_plane", "i_z": "u"},
+                "formula": {"i_x": "u", "i_y": "selected_plane", "i_z": "v"},
                 "transpose": True,
                 "flip_x": False,
                 "flip_z": False,

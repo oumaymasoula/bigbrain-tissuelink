@@ -62,7 +62,7 @@ def map_crop_polygon_to_source(
     """Map canvas pixels to crop voxel indices and physical coordinates.
 
     The crop visualization is ``Image.fromarray(data[:, y, :].T)``. Thus
-    canvas ``(u, v)`` maps to crop voxel ``(i_x=v, i_y=plane, i_z=u)``.
+    canvas ``(u, v)`` maps to crop voxel ``(i_x=u, i_y=plane, i_z=v)``.
     Coordinates are kept fractional until export so the mapping is auditable.
     """
     width, height = [float(value) for value in canvas_size]
@@ -73,8 +73,8 @@ def map_crop_polygon_to_source(
     for u, v in points_xy:
         if not np.isfinite([u, v]).all() or not (0.0 <= float(u) < width and 0.0 <= float(v) < height):
             raise ValueError("polygon vertex is outside the confirmed crop canvas")
-        ix = float(v) * (int(crop_shape[0]) / height)
-        iz = float(u) * (int(crop_shape[2]) / width)
+        ix = float(u) * (int(crop_shape[0]) / width)
+        iz = float(v) * (int(crop_shape[2]) / height)
         voxel = [ix, float(plane_index), iz]
         source_vertices.append(voxel)
         physical_vertices.append(
@@ -120,7 +120,7 @@ def build_polygon_export(
         "display_mapping": {
             "display_image": "data[:, selected_plane, :].T",
             "display_pixel_order": "(u,v)=(x right,y down)",
-            "to_nifti_index": "(i_x,i_y,i_z)=(v,selected_plane,u)",
+            "to_nifti_index": "(i_x,i_y,i_z)=(u,selected_plane,v)",
             "transpose": True,
             "flip_x": False,
             "flip_z": False,

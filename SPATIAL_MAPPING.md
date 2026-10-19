@@ -1,6 +1,6 @@
 # MRI–histology spatial mapping feasibility
 
-Status: feasibility report only. The existing BigBrain Cutout downloader and
+Status: feasibility report only. The existing BigBrain TissueLink downloader and
 its validated exports remain the active application. No MRI–histology page or
 coordinate service has been added because the complete mapping required for
 the high-resolution section provider has not been established.

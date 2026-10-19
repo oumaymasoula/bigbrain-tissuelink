@@ -41,8 +41,8 @@ def test_crop_polygon_mapping_preserves_axis_contract_and_affine():
         (100, 100),
         1,
     )
-    assert mapped["nifti_voxel_vertices_xyz"] == [[20.0, 1.0, 20.0], [20.0, 1.0, 60.0], [40.0, 1.0, 20.0]]
-    assert mapped["physical_vertices_mm"][0] == [-8.0, -0.98, -16.0]
+    assert mapped["nifti_voxel_vertices_xyz"] == [[10.0, 1.0, 40.0], [30.0, 1.0, 40.0], [10.0, 1.0, 80.0]]
+    assert mapped["physical_vertices_mm"][0] == [-9.0, -0.98, -12.0]
 
 
 def test_crop_polygon_out_of_bounds_is_rejected():

@@ -1,0 +1,20 @@
+{
+  "file": "cerebra_left_precentral_icbm2009c_sym_1mm_binary_roi.nii.gz",
+  "roi": "CerebrA Precentral",
+  "hemisphere": "left",
+  "source_label": 86,
+  "source_atlas_file": "mni_icbm152_CerebrA_tal_nlin_sym_09c.nii",
+  "template": "ICBM 2009c nonlinear symmetric (MNI152, tal_nlin_sym_09c), 1 mm",
+  "shape_xyz": [193, 229, 193],
+  "voxel_size_mm_xyz": [1.0, 1.0, 1.0],
+  "affine": [
+    [1.0, 0.0, 0.0, -96.0],
+    [0.0, 1.0, 0.0, -132.0],
+    [0.0, 0.0, 1.0, -78.0],
+    [0.0, 0.0, 0.0, 1.0]
+  ],
+  "binary_values": [0, 1],
+  "nonzero_voxels": 21393,
+  "sha256": "99b5ee39c809c4f187dfc193a6dc61ca862956bf4b86f6810933f4815885a098",
+  "anatomical_status": "Awaiting independent review"
+}

@@ -2,12 +2,13 @@ import csv
 import io
 import json
 import zipfile
+from datetime import datetime, timezone
 
 import pytest
 import nibabel as nib
 import numpy as np
 
-from patch_collection import add_entry, annotation_plane_from_image, collection_bytes, collection_zip_bytes, manual_patch_region_context, patch_id_for
+from patch_collection import add_entry, annotation_plane_from_image, bind_unmarked_png_metadata, collection_bytes, collection_visual_report_filename, collection_visual_report_html, collection_zip_bytes, manual_patch_region_context, patch_id_for
 from volume_alignment import voxel_center_world
 
 
@@ -67,6 +68,14 @@ def test_manual_patch_region_context_does_not_assert_membership():
     assert "unresolved atlas overlay diagnostics" in context["atlas_context"]["diagnostic_status"]
 
 
+def test_collection_metadata_binds_exact_unmarked_png():
+    metadata = bind_unmarked_png_metadata({"section_id": "section"}, "patch-1", b"png", (7, 5))
+    assert metadata["collection_patch_id"] == "patch-1"
+    assert metadata["unmarked_png_filename"] == "patch-1_unmarked_plane.png"
+    assert metadata["unmarked_png_shape_rows_cols"] == [7, 5]
+    assert metadata["unmarked_png_sha256"]
+
+
 def _entry(section_id: str, value: bytes):
     metadata = {
         "section_id": section_id,
@@ -119,7 +128,11 @@ def test_collection_zip_contains_raw_unmarked_marked_metadata_and_manifest():
     with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
         names = set(archive.namelist())
         assert "manifest.csv" in names
+        assert "manifest.json" in names
         assert "README.txt" in names
+        manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["schema_version"] == "1.0"
+        assert {patch["section_id"] for patch in manifest["patches"]} == {"3458", "3500"}
         for entry in (first, second):
             prefix = f"patches/{entry['patch_id']}"
             assert f"{prefix}/{entry['patch_id']}.nii.gz" in names
@@ -129,3 +142,55 @@ def test_collection_zip_contains_raw_unmarked_marked_metadata_and_manifest():
             assert metadata["section_id"] == entry["metadata"]["section_id"]
         rows = list(csv.DictReader(io.StringIO(archive.read("manifest.csv").decode())))
         assert {row["section_id"] for row in rows} == {"3458", "3500"}
+
+
+def test_offline_visual_report_supports_mixed_routes_embeds_images_and_escapes_user_text():
+    manual = _entry("3458", b"manual")
+    manual["user_label"] = '<script>alert("manual")</script>'
+    manual["metadata"].update({
+        "selected_patch_world_point": {"requested_world_xyz_mm": [1.0, 2.0, 3.0]},
+        "annotation_png_mapping": {"source_plane_expression": "data[:,0,:].T"},
+        "anatomical_review": "Not independently reviewed",
+    })
+    roi = _entry("3146", b"roi")
+    roi["metadata"].update({
+        "workflow": "experimental_template_roi",
+        "selected_mask_world_xyz_mm": [-31.0, -7.1, 22.0],
+        "annotation_plane_mapping": {"source_plane_expression": "data[:,1,:].T"},
+        "input_roi_filename": "right_cuneus.nii.gz",
+        "supported_template": "ICBM2009c symmetric 1 mm",
+        "input_roi_sha256": "roi-input-sha",
+        "anatomical_status": "Awaiting independent review",
+        "transform_provenance": {
+            "original_filename": "right_cuneus.nii.gz",
+            "template_identity": "ICBM2009c symmetric 1 mm",
+            "template_provenance": "CerebrA right cuneus label 43",
+            "input_sha256": "roi-input-sha",
+            "output_sha256": "roi-output-sha",
+            "container_digest": "sha256:container",
+            "interpolation": "nearest-neighbour",
+            "direction": "ICBM2009c to BigBrain",
+        },
+    })
+    roi["source_roi_overlay_png"] = b"source-overlay"
+    roi["transformed_roi_overlay_png"] = b"transformed-overlay"
+    report = collection_visual_report_html({manual["patch_id"]: manual, roi["patch_id"]: roi}).decode()
+    assert "Collection overview:</strong> 2 patch(es)" in report
+    assert "Starting route: Manual browsing" in report
+    assert "Starting route: Template ROI" in report
+    assert "right_cuneus.nii.gz" in report
+    assert "roi-input-sha" in report and "roi-output-sha" in report
+    assert "data[:,1,:].T" in report
+    assert "[2.0, 2.0, 2.0]" in report
+    assert report.count("data:image/png;base64,") == 6
+    assert "<script>alert" not in report
+    assert "&lt;script&gt;alert" in report
+    assert "src=\"http" not in report and "href=\"http" not in report
+    assert "<script src=" not in report and "<link rel=" not in report
+    assert "BigBrain is reference tissue from one donor" in report
+    assert "Not applicable — manual selection" in report
+
+
+def test_visual_report_filename_is_timestamped_and_stable_for_given_time():
+    moment = datetime(2026, 10, 19, 17, 55, 1, 123456, tzinfo=timezone.utc)
+    assert collection_visual_report_filename(moment) == "bigbrain_tissuelink_visual_report_20261019T175501123456Z.html"

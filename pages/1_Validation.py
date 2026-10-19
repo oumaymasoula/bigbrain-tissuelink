@@ -52,13 +52,10 @@ def add_orientation_labels(view: np.ndarray, title: str) -> np.ndarray:
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LOGO = ROOT / "assets" / "bigbrain-tissuelink-logo.png"
 MRI = VolumeSpec("donor MRI", ROOT / "outputs/spatial_feasibility/mri_to_blk_aligned.nii.gz")
 HIST = VolumeSpec("native histology", ROOT / "outputs/spatial_feasibility/full8_200um_optbal.nii.gz")
 
 st.set_page_config(page_title="BigBrain TissueLink — Alignment review", layout="wide")
-if LOGO.is_file():
-    st.image(str(LOGO), width=460)
 st.markdown(
     """
     <style>

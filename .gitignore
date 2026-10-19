@@ -18,6 +18,8 @@ outputs/
 *.png
 !assets/
 !assets/bigbrain-tissuelink-logo.png
+!assets/bigbrain-tissuelink-logo-cropped.png
+!assets/bigbrain-tissuelink-icon.png
 *.zip
 *.jsonl
 .env
@@ -27,3 +29,13 @@ secrets*
 docker-data/
 container-downloads/
 .git-public/
+
+# Small, documented source-template ROI examples are intentional project data.
+!examples/template_rois/*.nii.gz
+
+# Keep reusable demo automation/report text, not generated recordings/downloads.
+demo/*.mp4
+demo/*.webm
+demo/downloads/
+demo/verification_frames/
+demo/automation_results.json
