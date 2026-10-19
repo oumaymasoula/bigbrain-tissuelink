@@ -53,6 +53,7 @@ from region_navigation import (
 
 
 ROOT = Path(__file__).resolve().parent
+LOGO = ROOT / "assets" / "bigbrain-tissuelink-logo.png"
 MRI = VolumeSpec("donor MRI", ROOT / "outputs/spatial_feasibility/mri_to_blk_aligned.nii.gz")
 HIST = VolumeSpec("native histology", ROOT / "outputs/spatial_feasibility/full8_200um_optbal.nii.gz")
 REGISTERED_NAVIGATION_TARGETS = ("volume_viewer.py", "pages/1_Validation.py")
@@ -68,6 +69,8 @@ def validate_navigation_targets(root: Path = ROOT) -> None:
 validate_navigation_targets()
 
 st.set_page_config(page_title="BigBrain TissueLink", layout="wide")
+if LOGO.is_file():
+    st.image(str(LOGO), width=460)
 st.markdown(
     """
     <style>
