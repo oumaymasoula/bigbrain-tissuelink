@@ -131,7 +131,7 @@ The viewer uses documented final-histological-space reference coordinates. Match
 
 ## Current verification status
 
-- Automated suite: **49 tests passed** in the latest run. The geometry,
+- Automated suite: **50 tests passed** in the latest run. The geometry,
   collection and renderer regressions use synthetic fixtures; they do not
   replace anatomical review.
 - Real provider evidence includes bounded detailed retrieval for #3458 and

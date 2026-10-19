@@ -169,7 +169,7 @@ neighbourhood renderer. The non-square RGB overlay test exercises the actual
 marker renderer and confirms that horizontal and vertical lines use display
 `(u, v)` columns and rows.
 
-The current automated run reports **49 passed**. Geometry, display and
+The current automated run reports **50 passed**. Geometry, display and
 collection tests include synthetic fixtures and are software checks, not
 anatomical validation. Real provider checks are recorded separately below.
 
