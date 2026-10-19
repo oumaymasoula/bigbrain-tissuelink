@@ -1,7 +1,7 @@
 import nibabel as nib
 import numpy as np
 
-from registered_section_demo import map_section_pixel_to_world, world_to_grid_pixel
+from registered_section_demo import map_section_pixel_to_world, map_section_world_to_pixel, section_display_array, world_to_grid_pixel
 
 
 def test_section_display_mapping_preserves_xz_axis_order_and_centres():
@@ -22,3 +22,39 @@ def test_world_to_grid_pixel_uses_nearest_pixel_without_axis_swap():
     z_axis = np.array([10.0, 11.0, 12.0])
     assert world_to_grid_pixel((-0.6, 11.6), x_axis, z_axis) == (1, 2)
     assert world_to_grid_pixel((-20.0, 30.0), x_axis, z_axis) == (0, 2)
+
+
+def test_section_world_to_display_mapping_round_trips_asymmetric_point():
+    image = nib.Nifti1Image(
+        np.zeros((5, 2, 7), dtype=np.uint8),
+        np.array([[0.2, 0, 0, -10], [0, 0.02, 0, -1], [0, 0, 0.3, 20], [0, 0, 0, 1]], dtype=float),
+    )
+    world = [-9.4, -0.98, 20.9]
+    mapped = map_section_world_to_pixel(image, world, (700, 500))
+    round_trip = map_section_pixel_to_world(image, mapped["display_pixel_uv"], (700, 500), world[1])
+    assert np.allclose(round_trip["world_xyz_mm"], world)
+
+
+def test_displayed_non_square_pixel_maps_to_unique_source_voxel_at_two_sizes():
+    # Value 100*x + 10*y + z makes an axis swap immediately visible.
+    data = np.zeros((5, 2, 7), dtype=np.uint16)
+    for x in range(5):
+        for y in range(2):
+            for z in range(7):
+                data[x, y, z] = 100 * x + 10 * y + z
+    image = nib.Nifti1Image(
+        data,
+        np.array([[0.2, 0, 0, -10], [0, 0.02, 0, -1], [0, 0, 0.3, 20], [0, 0, 0, 1]], dtype=float),
+    )
+    displayed, convention = section_display_array(image)
+    assert displayed.shape == (7, 5)  # horizontal z, vertical x
+    assert convention["display_horizontal_source_axis"] == "z"
+    assert convention["display_vertical_source_axis"] == "x"
+    # Off-centre display pixel (u=5, v=1) is source (x=1, y=0, z=5).
+    assert displayed.shape == (7, 5)
+    assert data[1, 0, 5] == 105  # source value is not replaced by display contrast
+    for size in ((7, 5), (700, 500)):
+        mapped = map_section_pixel_to_world(image, (5 * (size[0] - 1) / 6, 1 * (size[1] - 1) / 4), size, -1.0)
+        assert np.allclose(mapped["source_voxel_xyz_continuous"], [1, 0, 5])
+        source_index = tuple(int(round(value)) for value in mapped["source_voxel_xyz_continuous"])
+        assert data[source_index] == 105

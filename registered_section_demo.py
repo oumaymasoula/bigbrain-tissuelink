@@ -20,7 +20,7 @@ import streamlit as st
 from PIL import Image, ImageDraw
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-from bigbrain_cutout import Bounds, MAX_BYTES, display_plane, fetch_crop, get_section
+from bigbrain_cutout import Bounds, MAX_BYTES, display_plane, fetch_crop, get_section, section_catalogue
 from volume_alignment import (
     _display_uint8,
     _sample_plane,
@@ -42,8 +42,8 @@ HIST_SPEC = VolumeSpec("native histology", ROOT / "outputs/spatial_feasibility/f
 
 
 @st.cache_resource(show_spinner=False)
-def registered_context():
-    section = get_section(SECTION_ID)
+def registered_context(section_id: str = SECTION_ID):
+    section = get_section(section_id)
     bbox = section.get_boundingbox(clip=False)
     provider = next(iter(section._providers.values()))
     provider_volume = next(iter(provider._fragments.values()))
@@ -62,13 +62,13 @@ def registered_volumes():
 
 
 @st.cache_data(show_spinner=False)
-def registered_overview(bounds_values: tuple[float, ...]):
+def registered_overview(bounds_values: tuple[float, ...], section_id: str = SECTION_ID):
     bounds = Bounds(*bounds_values)
     image, _, _ = fetch_crop(
         bounds,
         resolution_mm=OVERVIEW_RESOLUTION_MM,
         max_bytes=OVERVIEW_MAX_BYTES,
-        section_id=SECTION_ID,
+        section_id=section_id,
     )
     plane, plane_index, raw_range = display_plane(image)
     return image, plane, plane_index, raw_range
@@ -94,13 +94,36 @@ def raw_array_sha256(image) -> str:
     return hashlib.sha256(np.asanyarray(image.dataobj).tobytes(order="C")).hexdigest()
 
 
+def section_display_array(image) -> tuple[np.ndarray, dict]:
+    """Return the displayed X/Z plane and its explicit axis convention.
+
+    The scientific NIfTI remains ``(x, y, z)``.  For a displayed section,
+    horizontal pixels are source ``z`` and vertical pixels are source ``x``;
+    the transpose is display-only.  Keeping this declaration next to the
+    point mappers prevents the renderer and click handlers from drifting.
+    """
+    plane, slice_index, raw_range = display_plane(image)
+    return np.asarray(plane.T), {
+        "display_horizontal_source_axis": "z",
+        "display_vertical_source_axis": "x",
+        "transpose": True,
+        "flip_horizontal": False,
+        "flip_vertical": False,
+        "flip_x": False,
+        "flip_z": False,
+        "slice_axis": "y",
+        "slice_index": int(slice_index),
+        "raw_range": [int(raw_range[0]), int(raw_range[1])],
+    }
+
+
 def map_section_pixel_to_world(image, pixel_uv: tuple[float, float], display_size: tuple[int, int], world_y: float) -> dict:
     """Map displayed section (u=z, v=x) to world using voxel centres."""
-    plane, _, _ = display_plane(image)
+    plane, display_mapping = section_display_array(image)
     width, height = display_size
     u, v = pixel_uv
-    z_index = float(np.clip(u, 0, width - 1)) * (plane.shape[1] - 1) / max(1, width - 1)
-    x_index = float(np.clip(v, 0, height - 1)) * (plane.shape[0] - 1) / max(1, height - 1)
+    z_index = float(np.clip(u, 0, width - 1)) * (image.shape[2] - 1) / max(1, width - 1)
+    x_index = float(np.clip(v, 0, height - 1)) * (image.shape[0] - 1) / max(1, height - 1)
     inverse = np.linalg.inv(np.asarray(image.affine, dtype=float))
     y_index = float((inverse @ np.r_[0.0, world_y, 0.0, 1.0])[1])
     world = (np.asarray(image.affine, dtype=float) @ np.r_[x_index, y_index, z_index, 1.0])[:3]
@@ -109,7 +132,31 @@ def map_section_pixel_to_world(image, pixel_uv: tuple[float, float], display_siz
         "source_voxel_xyz_continuous": [x_index, y_index, z_index],
         "world_xyz_mm": world.astype(float).tolist(),
         "mapping": "display u -> source z, display v -> source x; y is the documented section centre; voxel centres",
+        **display_mapping,
+    }
+
+
+def map_section_world_to_pixel(image, world_xyz: tuple[float, float, float], display_size: tuple[int, int]) -> dict:
+    """Map a reference-space section point back to displayed section pixels."""
+    display_width, display_height = display_size
+    affine = np.asarray(image.affine, dtype=float)
+    voxel_xyz = (np.linalg.inv(affine) @ np.r_[world_xyz, 1.0])[:3]
+    shape = np.asarray(image.shape[:3], dtype=float)
+    if np.any(voxel_xyz < 0) or np.any(voxel_xyz > shape - 1):
+        raise ValueError("reference point is outside the detailed section image")
+    return {
+        "display_pixel_uv": [
+            float(voxel_xyz[2] * (display_width - 1) / max(1, shape[2] - 1)),
+            float(voxel_xyz[0] * (display_height - 1) / max(1, shape[0] - 1)),
+        ],
+        "source_voxel_xyz_continuous": voxel_xyz.astype(float).tolist(),
+        "world_xyz_mm": [float(value) for value in world_xyz],
+        "mapping": "reference world X/Z -> section inverse affine -> display u=z, v=x; voxel centres",
+        "display_horizontal_source_axis": "z",
+        "display_vertical_source_axis": "x",
         "transpose": True,
+        "flip_horizontal": False,
+        "flip_vertical": False,
         "flip_x": False,
         "flip_z": False,
     }

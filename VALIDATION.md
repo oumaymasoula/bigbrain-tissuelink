@@ -124,3 +124,89 @@ polygon canvas itself has no independent zoom control, so overview zoom/pan
 only changes its display placement, not the exported physical vertices.
 
 The Labelme import parser has automated checks for the existing mapping fixture, wrong-image checksum, wrong dimensions, unsupported shape type, non-finite vertices, and zoom/pan display remapping. A real polygon drawn and saved by the external Labelme GUI remains unperformed; the generated JSON fixture is not counted as that round trip.
+
+## Patch collection milestone
+
+### Atlas context versus patch membership
+
+Ordinary manually selected patches do **not** receive automatic anatomical
+region attribution. Their metadata contains
+`patch_region_membership: "not established"` and, separately, an
+`atlas_context` object naming the currently supported parcellation/region as
+context only. This context is not a claim that the selected pixels belong to
+that region, and user notes are not interpreted as anatomical labels.
+
+The unresolved atlas mask-overlay work remains in the separate experimental
+region-navigation diagnostics. It is not used to label manual patches and
+does not change patch selection, raw values, affines, or collection export.
+The nonzero-pixel and file-integrity checks in that diagnostic are numerical
+checks only; they are not anatomical validation.
+
+The new collection tests in `tests/test_patch_collection.py` use synthetic
+byte fixtures labelled as sections `3458` and `3500`. They validate deterministic
+IDs, duplicate rejection, removal, the 50 MiB budget, per-patch metadata,
+manifest rows, and ZIP member names. They do **not** perform provider fetches
+and do not prove that the browser UI collected two real sections.
+
+Earlier catalogue tests did use real bounded siibra provider fetches for
+sections including #3458, #3407, #3500 and #3556, but those tests exercised
+the downloader/export path, not the new browser collection button.
+
+No browser-downloaded collection ZIP was available for this validation run,
+so manual collection observations, raw NIfTI comparison, and two-section
+browser collection verification remain unperformed.
+
+The collection's unmarked PNG is the display-only selected y plane transposed
+for viewing (`display horizontal = source z`, `display vertical = source x`)
+at its native pixel dimensions; it has no crosshair, footprint, orientation
+labels, scale bar, or display enlargement. Its intensity is the existing
+1st–99th percentile linear uint8 visualization conversion from `display_plane`;
+the raw NIfTI values are unchanged. Pixel `(u, v)` maps to source voxel
+`(x, y, z)` as `(v, selected_y, u)` using the section affine and voxel-centre
+convention recorded in each patch metadata file.
+
+## Selection synchronization follow-up
+
+The detailed-section click and lower reconstruction marker previously used
+separate visible state paths: the click was stored as a section-space point,
+while the lower marker was rendered from the X/Y/Z widget values after the
+rerun. The UI now reports the clicked section pixel, mapped world XYZ, lower
+marker world XYZ, and next-fetch bounds together. A new detailed-section click
+immediately invalidates the active patch and signature while preserving the
+patch collection. The pure off-centre behavioral checks are in
+`tests/test_selection_sync.py`.
+
+The implementation now uses the detailed-section world point as the single
+active point for the MRI marker, reconstructed-histology marker, whole-section
+marker and next fetch bounds. The whole-section display is explicitly
+horizontal world X / vertical world Z and is separate from the cropped
+neighbourhood renderer. The non-square RGB overlay test exercises the actual
+marker renderer and confirms that horizontal and vertical lines use display
+`(u, v)` columns and rows.
+
+The current automated run reports **50 passed**. Geometry, display and
+collection tests include synthetic fixtures and are software checks, not
+anatomical validation. Real provider checks are recorded separately below.
+
+The browser interaction for this follow-up was not completed because the
+shared browser connector did not return a usable page snapshot; visual marker
+agreement remains pending manual confirmation.
+
+### Patch collection status
+
+The current collection implementation preserves entries across section
+changes within one Streamlit session, rejects duplicate IDs, enforces a 50 MiB
+session budget, and exports raw NIfTI, an unmarked PNG plane, a marked preview,
+per-patch metadata, a CSV manifest and a README. The unmarked PNG is a
+visualization-only 1st–99th percentile conversion of the selected native
+plane. For a source array in `(x, y, z)` order, its exact mapping is
+`PNG[v,u] = data[u, y_slice, v]`; `y_slice`, dimensions, affine and checksums
+are recorded in each patch metadata file.
+
+The automated collection tests use synthetic byte fixtures labelled #3458 and
+#3500. They verify collection bookkeeping and ZIP structure, not provider
+fetches or anatomical correspondence. Real provider evidence exists for a
+bounded #3458 detailed patch and bounded checks around #3500, but the browser
+workflow that collects both sections and inspects its downloaded ZIP remains
+incomplete. Manual observations and automated results must therefore remain
+separate.

@@ -52,21 +52,60 @@ def add_orientation_labels(view: np.ndarray, title: str) -> np.ndarray:
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LOGO = ROOT / "assets" / "bigbrain-tissuelink-logo.png"
 MRI = VolumeSpec("donor MRI", ROOT / "outputs/spatial_feasibility/mri_to_blk_aligned.nii.gz")
 HIST = VolumeSpec("native histology", ROOT / "outputs/spatial_feasibility/full8_200um_optbal.nii.gz")
 
 st.set_page_config(page_title="BigBrain TissueLink — Alignment review", layout="wide")
-st.title("BigBrain TissueLink")
-st.caption("Alignment review · advanced")
-st.caption("Advanced validation page — independent MRI/histology point pairs")
-st.warning(
-    "Validation only. This page records independently selected points; it does not estimate registration accuracy, "
-    "create a registration, or connect high-resolution sections."
+if LOGO.is_file():
+    st.image(str(LOGO), width=460)
+st.markdown(
+    """
+    <style>
+    :root { --ink:#102238; --muted:#63748a; --teal:#087f8c; --line:#dbe4ec; }
+    [data-testid="stSidebar"] { border-right:1px solid var(--line); }
+    [data-testid="stSidebarNav"] a { color:var(--ink); border-radius:9px; }
+    [data-testid="stSidebarNav"] a:hover { background:#dceff0; color:#075c65; }
+    [data-testid="stSidebarNav"] a:focus-visible { outline:3px solid #65bfc5; outline-offset:2px; }
+    [data-testid="stSidebarNav"] a[aria-current="page"] { background:#d4eeee; color:#075c65; font-weight:750; }
+    [data-testid="stSidebarNav"] span { font-weight:600; }
+    [data-testid="stCaptionContainer"] { color:var(--muted); }
+    [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label { color:var(--ink); }
+    [data-testid="stAlert"] { color:var(--ink); }
+    [data-testid="stButton"] button { color:var(--ink); background:#fff; border:1px solid #b8c8d5; }
+    [data-testid="stButton"] button:hover { color:#075c65; border-color:#087f8c; background:#e9f7f7; }
+    [data-testid="stButton"] button:focus-visible { outline:3px solid #65bfc5; outline-offset:2px; }
+    [data-testid="stButton"] button:disabled { color:#718096; background:#edf1f4; border-color:#d3dce3; }
+    [data-testid="stExpander"] details { border-color:var(--line); background:#fff; }
+    [data-testid="stExpander"] summary { color:var(--ink); }
+    [data-baseweb="select"] > div { background:#fff; color:var(--ink); border-color:#b8c8d5; }
+    [data-baseweb="select"] [role="option"] { color:var(--ink); background:#fff; }
+    [data-baseweb="select"] [role="option"][aria-selected="true"] { background:#d4eeee; color:#075c65; }
+    [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input { color:var(--ink); background:#fff; }
+    .ar-hero { padding:1.15rem 1.4rem 1rem; border:1px solid #dbe4ec; border-radius:18px; background:linear-gradient(135deg,#fff 0%,#f2f7fb 100%); margin-bottom:1rem; }
+    .ar-kicker { color:#087f8c; font-size:.76rem; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
+    .ar-hero h1 { color:#102238; margin:.25rem 0 .35rem; font-size:2rem; }
+    .ar-hero p { color:#63748a; margin:0; max-width:760px; }
+    .ar-steps { display:grid; grid-template-columns:repeat(3,1fr); gap:.6rem; margin:.8rem 0 1.1rem; }
+    .ar-step { background:#fff; border:1px solid #dbe4ec; border-radius:12px; padding:.65rem .8rem; }
+    .ar-step b { display:block; color:#087f8c; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; }
+    .ar-step span { color:#102238; font-weight:650; font-size:.9rem; }
+    </style>
+    <div class="ar-hero">
+      <div class="ar-kicker">Advanced validation</div>
+      <h1>Independent alignment review</h1>
+      <p>Choose a point separately in the donor MRI and reconstructed histology, then record how far the two selected coordinates differ.</p>
+    </div>
+    <div class="ar-steps">
+      <div class="ar-step"><b>01 · Select</b><span>Choose a candidate and active panel</span></div>
+      <div class="ar-step"><b>02 · Save</b><span>Click and save each modality point</span></div>
+      <div class="ar-step"><b>03 · Compare</b><span>Review the coordinate discrepancy</span></div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
-st.info(
-    "How to read this: a click selects a displayed world coordinate; the magenta MRI box is a sampling voxel, "
-    "not an uncertainty radius; a saved discrepancy is a coordinate-test measurement, not anatomical accuracy."
-)
+st.warning("Coordinate review only; it is not anatomical validation or a registration accuracy score.")
+st.caption("The main Explorer is for navigation and patch export. Use this page only to record independent point pairs.")
 
 if not MRI.path.exists() or not HIST.path.exists():
     st.error("The local feasibility volumes are missing.")
@@ -75,12 +114,13 @@ if not MRI.path.exists() or not HIST.path.exists():
 mri = load_volume(MRI)
 hist = load_volume(HIST)
 common = common_world_bounds([mri, hist])
-st.caption(
-    "Transform/template: official final histological processing-space world coordinates; single donor; "
-    "MRI native voxel size %.3f mm, reconstructed histology native voxel size %.3f mm. "
-    "Expected registration error: unavailable."
-    % (mri.header.get_zooms()[0], hist.header.get_zooms()[0])
-)
+with st.expander("Advanced · source and coordinate context", expanded=False):
+    st.caption(
+        "Transform/template: official final histological processing-space world coordinates; single donor; "
+        "MRI native voxel size %.3f mm, reconstructed histology native voxel size %.3f mm. "
+        "Expected registration error: unavailable."
+        % (mri.header.get_zooms()[0], hist.header.get_zooms()[0])
+    )
 
 names = [
     "P1 superior", "P2 central", "P3 lateral", "P4 left", "P5 right",
@@ -98,10 +138,14 @@ if "validation_pairs" not in st.session_state:
 if "validation_pending" not in st.session_state:
     st.session_state.validation_pending = {}
 
-name = st.selectbox("Landmark candidate", names)
-world_y = st.slider("Shared world Y slice (mm)", float(common["min"][1]), float(common["max"][1]), -25.7922, 0.2)
-step = st.select_slider("Display spacing", options=[0.2, 0.4, 0.8], value=0.4, format_func=lambda x: f"{x:.1f} mm/pixel")
-low, high = st.slider("Display contrast (visualization only)", 0.0, 100.0, (1.0, 99.0), 0.5)
+st.subheader("1. Set up a point review")
+with st.container(border=True):
+    name = st.selectbox("Landmark candidate", names, help="These are review slots, not anatomical labels.")
+    active = st.radio("Click in", ["MRI", "Histology"], horizontal=True)
+with st.expander("Advanced · slice and display controls", expanded=False):
+    world_y = st.slider("Shared world Y slice (mm)", float(common["min"][1]), float(common["max"][1]), -25.7922, 0.2)
+    step = st.select_slider("Display spacing", options=[0.2, 0.4, 0.8], value=0.4, format_func=lambda x: f"{x:.1f} mm/pixel")
+    low, high = st.slider("Display contrast (visualization only)", 0.0, 100.0, (1.0, 99.0), 0.5)
 x_axis = np.arange(common["min"][0], common["max"][0] + step * 0.5, step)
 z_axis = np.arange(common["min"][2], common["max"][2] + step * 0.5, step)
 mri_plane, _ = _sample_plane(mri, world_y, x_axis, z_axis)
@@ -109,41 +153,75 @@ hist_plane, _ = _sample_plane(hist, world_y, x_axis, z_axis)
 mri_view = _display_uint8(mri_plane, low, high)
 hist_view = _display_uint8(hist_plane, low, high)
 
-active = st.radio("Select independently in", ["MRI", "Histology"], horizontal=True)
 existing = st.session_state.validation_pairs.get(name, {})
-pending = st.session_state.validation_pending.get((name, active.lower()))
-point = existing.get(active.lower()) or pending
-if point is None:
-    d = defaults[name]
-    point = [float(d[0]), float(world_y), float(d[2])]
-u = int(np.clip(round((point[0] - x_axis[0]) / step), 0, len(x_axis) - 1))
-v = int(np.clip(round((point[2] - z_axis[0]) / step), 0, len(z_axis) - 1))
 
+
+def point_for(modality: str) -> list[float]:
+    pending_point = st.session_state.validation_pending.get((name, modality))
+    point = existing.get(modality) or pending_point
+    if point is not None:
+        return [float(value) for value in point]
+    d = defaults[name]
+    return [float(d[0]), float(world_y), float(d[2])]
+
+
+mri_point = point_for("mri")
+histology_point = point_for("histology")
+
+
+def point_to_pixel(point: list[float]) -> tuple[int, int]:
+    return (
+        int(np.clip(round((point[0] - x_axis[0]) / step), 0, len(x_axis) - 1)),
+        int(np.clip(round((point[2] - z_axis[0]) / step), 0, len(z_axis) - 1)),
+    )
+
+
+mri_u, mri_v = point_to_pixel(mri_point)
+histology_u, histology_v = point_to_pixel(histology_point)
+mri_display = add_orientation_labels(add_scale_bar(rgb_with_crosshair(mri_view, mri_u, mri_v), step), "MRI · visual report")
+histology_display = add_orientation_labels(add_scale_bar(rgb_with_crosshair(hist_view, histology_u, histology_v), step), "Histology · visual report")
+
+st.subheader("2. Select and save points")
+st.caption("The panel named below with the hand cursor is clickable. Yellow crosshairs are guides; click the image to place a point.")
 left, right = st.columns(2)
 with left:
     st.markdown("### Reference MRI")
-    st.caption("RAS: L/R in-plane, I/S in-plane; A/P is the shared Y slice")
-    st.image(add_orientation_labels(add_scale_bar(rgb_with_crosshair(mri_view, u, v), step), "MRI · visual report"), use_container_width=True)
+    st.caption("RAS X/Z plane · shared Y slice")
+    if active == "MRI":
+        st.caption("🖱️ Click this image to choose the MRI point")
+        clicked = streamlit_image_coordinates(mri_display, width=int(mri_display.shape[1]), key=f"validation_picker_MRI_{name}")
+    else:
+        st.caption("Comparison view · select Histology above to click here")
+        st.image(mri_display, use_container_width=True)
 with right:
     st.markdown("### Reconstructed histology — 200 µm")
-    st.caption("RAS: L/R in-plane, I/S in-plane; A/P is the shared Y slice")
-    st.image(add_orientation_labels(add_scale_bar(rgb_with_crosshair(hist_view, u, v), step), "Histology · visual report"), use_container_width=True)
+    st.caption("RAS X/Z plane · shared Y slice")
+    if active == "Histology":
+        st.caption("🖱️ Click this image to choose the histology point")
+        clicked = streamlit_image_coordinates(histology_display, width=int(histology_display.shape[1]), key=f"validation_picker_Histology_{name}")
+    else:
+        st.caption("Comparison view · select MRI above to click here")
+        st.image(histology_display, use_container_width=True)
 
-clicked = streamlit_image_coordinates(mri_view if active == "MRI" else hist_view, width=int(mri_view.shape[1]), key=f"validation_picker_{active}_{name}")
+click_key = None
 if clicked:
+    click_key = (name, active.lower(), round(float(clicked.get("x", 0.0)), 2), round(float(clicked.get("y", 0.0)), 2))
+if clicked and click_key != st.session_state.get("validation_last_click"):
+    st.session_state.validation_last_click = click_key
     _, selected = display_pixel_to_world(x_axis, z_axis, world_y, (clicked["x"], clicked["y"]))
     st.session_state.validation_pending[(name, active.lower())] = selected
     st.rerun()
 
-if pending is None and active.lower() not in existing:
-    st.info(f"Click the {active} image to create an independent point. The displayed candidate is only a navigation default.")
-st.write(f"Selected {active} point: X={point[0]:.2f}, Y={point[1]:.2f}, Z={point[2]:.2f} mm")
+selected_point = point_for(active.lower())
+if active.lower() not in existing and (name, active.lower()) not in st.session_state.validation_pending:
+    st.info(f"Click the highlighted {active} panel to create an independent point. The yellow crosshair is only a guide until you click.")
+st.write(f"Selected {active} point: X={selected_point[0]:.2f}, Y={selected_point[1]:.2f}, Z={selected_point[2]:.2f} mm")
 reviewer = st.text_input("Reviewer", value="")
 observation = st.text_input("Observation", value="")
-save_allowed = active.lower() in existing or pending is not None
+save_allowed = active.lower() in existing or (name, active.lower()) in st.session_state.validation_pending
 if st.button(f"Save {active} point", disabled=not save_allowed):
     item = dict(st.session_state.validation_pairs.get(name, {}))
-    item[active.lower()] = [float(value) for value in point]
+    item[active.lower()] = [float(value) for value in selected_point]
     item["reviewer"] = reviewer
     item["observation"] = observation
     item["status"] = "Unreviewed" if not ("mri" in item and "histology" in item) else "Reviewed by independent point selection"
@@ -163,12 +241,24 @@ rows = []
 distances = []
 for candidate in names:
     item = st.session_state.validation_pairs.get(candidate, {})
+    pending_modalities = [
+        modality.upper()
+        for modality in ("mri", "histology")
+        if (candidate, modality) in st.session_state.validation_pending
+    ]
     distance = None
     if "mri" in item and "histology" in item:
         distance = float(np.linalg.norm(np.asarray(item["mri"]) - np.asarray(item["histology"])))
         distances.append(distance)
-    rows.append({"landmark": candidate, "discrepancy_mm": "—" if distance is None else f"{distance:.1f}", "status": item.get("status", "Unreviewed"), "reviewer": item.get("reviewer", "")})
-st.subheader("Landmark review table")
+    if item:
+        status = item.get("status", "Unreviewed")
+    elif pending_modalities:
+        status = f"Pending {', '.join(pending_modalities)} — save point"
+    else:
+        status = "Unreviewed"
+    rows.append({"landmark": candidate, "discrepancy_mm": "—" if distance is None else f"{distance:.1f}", "status": status, "reviewer": item.get("reviewer", "")})
+st.subheader("3. Review saved discrepancies")
+st.caption("The table changes after a point is saved. A click alone remains pending and is not included in exports.")
 st.dataframe(rows, use_container_width=True, hide_index=True)
 if distances:
     st.caption(f"Coordinate-test distribution only: median {np.median(distances):.1f} mm; range {min(distances):.1f}–{max(distances):.1f} mm. Not anatomical accuracy.")
@@ -183,4 +273,13 @@ export = {
     "pairs": st.session_state.validation_pairs,
     "interpretation": "Numerical discrepancies are coordinate-test measurements, not anatomical accuracy or registration uncertainty.",
 }
-st.download_button("Export landmark review JSON", json.dumps(export, indent=2) + "\n", "landmark_review.json", "application/json")
+if st.session_state.validation_pairs:
+    st.download_button(
+        "Export saved landmark review (JSON)",
+        json.dumps(export, indent=2) + "\n",
+        "landmark_review.json",
+        "application/json",
+        help="Exports saved independent MRI/histology point pairs, reviewer notes, statuses, and source identities.",
+    )
+else:
+    st.info("No saved landmark pairs yet. Save at least one MRI or histology point before exporting JSON.")
