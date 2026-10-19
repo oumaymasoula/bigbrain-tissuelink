@@ -16,6 +16,8 @@ outputs/
 *.tif
 *.tiff
 *.png
+!assets/
+!assets/bigbrain-tissuelink-logo.png
 *.zip
 *.jsonl
 .env

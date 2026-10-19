@@ -1,5 +1,7 @@
 # BigBrain TissueLink
 
+![BigBrain TissueLink logo](assets/bigbrain-tissuelink-logo.png)
+
 BigBrain TissueLink is a local research tool for exploring the public BigBrain donor MRI alongside reconstructed histology. It helps a researcher navigate to one documented registered section, inspect a bounded detailed tissue patch, and export the image with spatial metadata and provenance.
 
 ## Workflow

@@ -8,6 +8,7 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
 PAGES = ("volume_viewer.py", "pages/1_Validation.py")
+LOGO = ROOT / "assets" / "bigbrain-tissuelink-logo.png"
 
 
 def validate_pages(root: Path = ROOT) -> None:
@@ -18,6 +19,8 @@ def validate_pages(root: Path = ROOT) -> None:
 
 validate_pages()
 st.set_page_config(page_title="BigBrain TissueLink", layout="wide")
+if LOGO.is_file():
+    st.logo(str(LOGO))
 
 explorer = st.Page("volume_viewer.py", title="MRI–Histology Explorer", icon="🧠")
 alignment = st.Page("pages/1_Validation.py", title="Alignment review (advanced)", icon="🔎")
