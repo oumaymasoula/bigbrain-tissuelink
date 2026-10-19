@@ -15,7 +15,7 @@ The workflow uses reference data from one donor. It is for spatial inspection, n
 | Available now | Not included yet |
 | --- | --- |
 | Donor MRI and reconstructed histology navigation | Arbitrary participant-MRI upload |
-| Registered detailed section **#3458** | Automatic registration |
+| 145 metadata-discovered registered sections; demonstrated detailed workflow for **#3458** | Automatic registration |
 | Bounded patch retrieval with request limits | Cellular-resolution claims from the 200 µm volume |
 | Native scientific NIfTI plus visual PNG and JSON provenance | Anatomically validated correspondence |
 | Optional in-app polygon annotation and Legacy/Labelme import | Region-name search or segmentation |
@@ -23,6 +23,14 @@ The workflow uses reference data from one donor. It is for spatial inspection, n
 The displayed reference volumes are MRI at approximately **0.444 mm** and reconstructed histology at **200 µm**; the latter does not resolve individual cells. The demonstrated #3458 detailed request asks for `0.01 mm` and currently returns approximately `[0.008, 0.020, 0.008] mm` with shape `(251, 2, 251)`. Requested and actual resolutions are shown separately in the app and export metadata.
 
 The detailed section is placed using documented reference-space provider geometry and remains **Not independently reviewed** anatomically. The two y samples in the preserved default crop are retained because the provider returns one source plane plus a zero-filled padding plane; they are not silently squeezed.
+
+After fetching a detailed patch, **Add patch to collection** saves it in the
+current browser session with a deterministic patch ID, optional user label and
+note, section identity, bounds, affine, actual resolution and checksums.
+Collection export contains each raw NIfTI, an unmarked PNG plane for external
+annotation, a separate marked preview, per-patch metadata, `manifest.csv` and
+a README. The collection is capped at 50 MiB and is not persistent across a
+browser refresh; download the ZIP to retain it.
 
 ## Install and launch
 
@@ -53,6 +61,47 @@ The app needs the local feasibility volumes at:
 outputs/spatial_feasibility/mri_to_blk_aligned.nii.gz
 outputs/spatial_feasibility/full8_200um_optbal.nii.gz
 ```
+
+### Reference-volume setup
+
+These are the exact public BigBrain Release 2015 files used by the paired
+viewer. Download them only when needed; they are large and are not included
+in Git:
+
+```bash
+mkdir -p outputs/spatial_feasibility
+curl -L --fail --retry 3 \
+  https://ftp.bigbrainproject.org/bigbrain-ftp/BigBrainRelease.2015/3D_MRI/nii/mri_to_blk_aligned.nii.gz \
+  -o outputs/spatial_feasibility/mri_to_blk_aligned.nii.gz
+curl -L --fail --retry 3 \
+  https://ftp.bigbrainproject.org/bigbrain-ftp/BigBrainRelease.2015/3D_Volumes/Histological_Space/nii/full8_200um_optbal.nii.gz \
+  -o outputs/spatial_feasibility/full8_200um_optbal.nii.gz
+```
+
+Verify that the files are the expected NIfTI volumes before launching:
+
+```bash
+.venv/bin/python - <<'PY'
+import nibabel as nib
+from pathlib import Path
+expected = {
+    "mri_to_blk_aligned.nii.gz": ((315, 362, 284), (0.44444445, 0.44444445, 0.44444445)),
+    "full8_200um_optbal.nii.gz": ((696, 770, 605), (0.2, 0.2, 0.2)),
+}
+root = Path("outputs/spatial_feasibility")
+for name, (shape, zooms) in expected.items():
+    image = nib.load(root / name)
+    actual_zooms = tuple(round(float(v), 7) for v in image.header.get_zooms()[:3])
+    assert tuple(image.shape[:3]) == shape, (name, image.shape)
+    assert actual_zooms == tuple(round(v, 7) for v in zooms), (name, actual_zooms)
+    print(name, "OK", image.shape[:3], actual_zooms)
+PY
+```
+
+The URLs, headers, processing-space evidence and licensing caveats are
+documented in [SPATIAL_MAPPING.md](SPATIAL_MAPPING.md). File sizes and
+checksums can vary only if the upstream release changes; record
+`sha256sum` output locally when mirroring these files.
 
 The volume-level inspection can be run separately:
 

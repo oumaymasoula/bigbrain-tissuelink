@@ -59,6 +59,26 @@ st.set_page_config(page_title="BigBrain TissueLink — Alignment review", layout
 st.markdown(
     """
     <style>
+    :root { --ink:#102238; --muted:#63748a; --teal:#087f8c; --line:#dbe4ec; }
+    [data-testid="stSidebar"] { border-right:1px solid var(--line); }
+    [data-testid="stSidebarNav"] a { color:var(--ink); border-radius:9px; }
+    [data-testid="stSidebarNav"] a:hover { background:#dceff0; color:#075c65; }
+    [data-testid="stSidebarNav"] a:focus-visible { outline:3px solid #65bfc5; outline-offset:2px; }
+    [data-testid="stSidebarNav"] a[aria-current="page"] { background:#d4eeee; color:#075c65; font-weight:750; }
+    [data-testid="stSidebarNav"] span { font-weight:600; }
+    [data-testid="stCaptionContainer"] { color:var(--muted); }
+    [data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label { color:var(--ink); }
+    [data-testid="stAlert"] { color:var(--ink); }
+    [data-testid="stButton"] button { color:var(--ink); background:#fff; border:1px solid #b8c8d5; }
+    [data-testid="stButton"] button:hover { color:#075c65; border-color:#087f8c; background:#e9f7f7; }
+    [data-testid="stButton"] button:focus-visible { outline:3px solid #65bfc5; outline-offset:2px; }
+    [data-testid="stButton"] button:disabled { color:#718096; background:#edf1f4; border-color:#d3dce3; }
+    [data-testid="stExpander"] details { border-color:var(--line); background:#fff; }
+    [data-testid="stExpander"] summary { color:var(--ink); }
+    [data-baseweb="select"] > div { background:#fff; color:var(--ink); border-color:#b8c8d5; }
+    [data-baseweb="select"] [role="option"] { color:var(--ink); background:#fff; }
+    [data-baseweb="select"] [role="option"][aria-selected="true"] { background:#d4eeee; color:#075c65; }
+    [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input { color:var(--ink); background:#fff; }
     .ar-hero { padding:1.15rem 1.4rem 1rem; border:1px solid #dbe4ec; border-radius:18px; background:linear-gradient(135deg,#fff 0%,#f2f7fb 100%); margin-bottom:1rem; }
     .ar-kicker { color:#087f8c; font-size:.76rem; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
     .ar-hero h1 { color:#102238; margin:.25rem 0 .35rem; font-size:2rem; }

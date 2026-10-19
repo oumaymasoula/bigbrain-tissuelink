@@ -174,8 +174,8 @@ def map_preview_rect_to_source(rect, affine, source_shape, display_size, view_or
     full_u1 = float(view_origin[0]) + right * window_width / canvas_width
     full_v0 = float(view_origin[1]) + top * window_height / canvas_height
     full_v1 = float(view_origin[1]) + bottom * window_height / canvas_height
-    scale_u = source_shape[2] / display_size[0]
-    scale_v = source_shape[0] / display_size[1]
+    scale_u = max(1, source_shape[2] - 1) / max(1, display_size[0] - 1)
+    scale_v = max(1, source_shape[0] - 1) / max(1, display_size[1] - 1)
     u0, u1 = full_u0 * scale_u, full_u1 * scale_u
     v0, v1 = full_v0 * scale_v, full_v1 * scale_v
     corners = [affine @ np.array([v, 0.0, u, 1.0]) for u, v in ((u0, v0), (u1, v0), (u0, v1), (u1, v1))]
@@ -198,8 +198,11 @@ def map_source_bounds_to_preview_rect(bounds_xz, affine, source_shape, display_s
     display_points = []
     for point in source_points:
         voxel = inverse @ point
-        full_u = voxel[2] * display_size[0] / source_shape[2]
-        full_v = voxel[0] * display_size[1] / source_shape[0]
+        # The display uses voxel centres: source index 0 is display pixel 0
+        # and source index n-1 is display pixel display_n-1.  This matches
+        # the click mapper and avoids a half-pixel drift in the footprint.
+        full_u = voxel[2] * max(1, display_size[0] - 1) / max(1, source_shape[2] - 1)
+        full_v = voxel[0] * max(1, display_size[1] - 1) / max(1, source_shape[0] - 1)
         display_points.append((
             (full_u - view_origin[0]) * canvas_width / window_width,
             (full_v - view_origin[1]) * canvas_height / window_height,

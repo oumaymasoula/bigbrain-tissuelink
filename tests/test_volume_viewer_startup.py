@@ -72,3 +72,25 @@ def test_registered_overview_click_is_deduplicated_before_fetch_button():
     source = (PROJECT_ROOT / "volume_viewer.py").read_text()
     assert "volume_viewer_last_section_click" in source
     assert "section_click_key != st.session_state.get(\"volume_viewer_last_section_click\")" in source
+
+
+def test_nearby_navigation_defers_slider_key_mutation_to_next_run():
+    source = (PROJECT_ROOT / "volume_viewer.py").read_text()
+    assert "pending_world_y_navigation" in source
+    assert "st.session_state.world_y_slice = nearest[\"plane_y_mm\"]" not in source
+
+
+def test_registered_display_uses_horizontal_z_spacing_and_declared_labels():
+    source = (PROJECT_ROOT / "volume_viewer.py").read_text()
+    assert "add_scale_bar(patch_display, detailed_zooms[2] / detail_zoom)" in source
+    assert "display_horizontal_source_axis" in (PROJECT_ROOT / "registered_section_demo.py").read_text()
+
+
+def test_patch_collection_is_separate_from_current_selection_state():
+    source = (PROJECT_ROOT / "volume_viewer.py").read_text()
+    assert "patch_collection" in source
+    assert "Add patch to collection" in source
+    assert "collection_zip_bytes" in source
+    assert 'st.session_state.patch_collection' not in source.split('if st.session_state.get("selected_registered_section_id") != selected_section_id:', 1)[1].split('st.session_state.selected_registered_section_id', 1)[0]
+    assert 'key="collection-add-disabled"' in source
+    assert "Fetch a detailed patch first" in source

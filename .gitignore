@@ -1,8 +1,11 @@
 .venv/
+.vscode/
 __pycache__/
 .pytest_cache/
 outputs/
-.streamlit/
+.streamlit/*
+!.streamlit/
+!.streamlit/config.toml
 .mypy_cache/
 .ruff_cache/
 .coverage

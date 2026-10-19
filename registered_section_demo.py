@@ -94,13 +94,36 @@ def raw_array_sha256(image) -> str:
     return hashlib.sha256(np.asanyarray(image.dataobj).tobytes(order="C")).hexdigest()
 
 
+def section_display_array(image) -> tuple[np.ndarray, dict]:
+    """Return the displayed X/Z plane and its explicit axis convention.
+
+    The scientific NIfTI remains ``(x, y, z)``.  For a displayed section,
+    horizontal pixels are source ``z`` and vertical pixels are source ``x``;
+    the transpose is display-only.  Keeping this declaration next to the
+    point mappers prevents the renderer and click handlers from drifting.
+    """
+    plane, slice_index, raw_range = display_plane(image)
+    return np.asarray(plane.T), {
+        "display_horizontal_source_axis": "z",
+        "display_vertical_source_axis": "x",
+        "transpose": True,
+        "flip_horizontal": False,
+        "flip_vertical": False,
+        "flip_x": False,
+        "flip_z": False,
+        "slice_axis": "y",
+        "slice_index": int(slice_index),
+        "raw_range": [int(raw_range[0]), int(raw_range[1])],
+    }
+
+
 def map_section_pixel_to_world(image, pixel_uv: tuple[float, float], display_size: tuple[int, int], world_y: float) -> dict:
     """Map displayed section (u=z, v=x) to world using voxel centres."""
-    plane, _, _ = display_plane(image)
+    plane, display_mapping = section_display_array(image)
     width, height = display_size
     u, v = pixel_uv
-    z_index = float(np.clip(u, 0, width - 1)) * (plane.shape[1] - 1) / max(1, width - 1)
-    x_index = float(np.clip(v, 0, height - 1)) * (plane.shape[0] - 1) / max(1, height - 1)
+    z_index = float(np.clip(u, 0, width - 1)) * (image.shape[2] - 1) / max(1, width - 1)
+    x_index = float(np.clip(v, 0, height - 1)) * (image.shape[0] - 1) / max(1, height - 1)
     inverse = np.linalg.inv(np.asarray(image.affine, dtype=float))
     y_index = float((inverse @ np.r_[0.0, world_y, 0.0, 1.0])[1])
     world = (np.asarray(image.affine, dtype=float) @ np.r_[x_index, y_index, z_index, 1.0])[:3]
@@ -109,9 +132,7 @@ def map_section_pixel_to_world(image, pixel_uv: tuple[float, float], display_siz
         "source_voxel_xyz_continuous": [x_index, y_index, z_index],
         "world_xyz_mm": world.astype(float).tolist(),
         "mapping": "display u -> source z, display v -> source x; y is the documented section centre; voxel centres",
-        "transpose": True,
-        "flip_x": False,
-        "flip_z": False,
+        **display_mapping,
     }
 
 
@@ -131,7 +152,11 @@ def map_section_world_to_pixel(image, world_xyz: tuple[float, float, float], dis
         "source_voxel_xyz_continuous": voxel_xyz.astype(float).tolist(),
         "world_xyz_mm": [float(value) for value in world_xyz],
         "mapping": "reference world X/Z -> section inverse affine -> display u=z, v=x; voxel centres",
+        "display_horizontal_source_axis": "z",
+        "display_vertical_source_axis": "x",
         "transpose": True,
+        "flip_horizontal": False,
+        "flip_vertical": False,
         "flip_x": False,
         "flip_z": False,
     }
