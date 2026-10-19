@@ -42,10 +42,10 @@ Run the bounded real-data CLI example:
 Start the primary app:
 
 ```bash
-.venv/bin/streamlit run navigation.py --server.port 8504
+.venv/bin/streamlit run navigation.py --server.port 8513
 ```
 
-Open <http://127.0.0.1:8504/>. Choose the MRI–Histology Explorer, activate **Explore registered detailed section #3458**, select an X/Z location, fetch the bounded patch, inspect it, and download the package.
+Open <http://127.0.0.1:8513/>. The current entry point is `navigation.py`; choose the MRI–Histology Explorer, select a registered section, confirm the reference plane, choose an X/Z location, fetch the bounded patch, inspect it, and download the package.
 
 The app needs the local feasibility volumes at:
 
@@ -76,9 +76,16 @@ Location reports similarly separate visual PNGs from native-grid MRI and reconst
 
 ## Validation and scope
 
-The documented real-data milestone, provider issue review, section metadata audit, coordinate conventions, overlap checks, export checks, and browser checks are recorded in [VALIDATION.md](VALIDATION.md). Reference-volume mapping and limitations are in [SPATIAL_MAPPING.md](SPATIAL_MAPPING.md); the registered-section feasibility evidence is in [SECTION_VOLUME_MAPPING_FEASIBILITY.md](SECTION_VOLUME_MAPPING_FEASIBILITY.md). The external MRI execution status is in [EXTERNAL_MRI_EXECUTION_REPORT.md](EXTERNAL_MRI_EXECUTION_REPORT.md).
+The documented real-data milestone, provider issue review, section metadata audit, coordinate conventions, overlap checks, export checks, and browser checks are recorded in [VALIDATION.md](VALIDATION.md). The multi-section catalogue and bounded-fetch verification are in [SECTION_CATALOGUE_VALIDATION.md](SECTION_CATALOGUE_VALIDATION.md). Reference-volume mapping and limitations are in [SPATIAL_MAPPING.md](SPATIAL_MAPPING.md); the registered-section feasibility evidence is in [SECTION_VOLUME_MAPPING_FEASIBILITY.md](SECTION_VOLUME_MAPPING_FEASIBILITY.md). The external MRI execution status is in [EXTERNAL_MRI_EXECUTION_REPORT.md](EXTERNAL_MRI_EXECUTION_REPORT.md).
 
 The viewer uses documented final-histological-space reference coordinates. Matching world coordinates do not guarantee matching anatomy, and no guessed flip, new registration, uncertainty estimate, or cellular-equivalence claim is applied. External participant-MRI upload is not ready because the exact ICBM2009c/BigBrainWarp execution chain has not completed locally.
+
+## Current verification status
+
+- Automated suite: **31 tests passed** in the latest run.
+- Initial browser inspection observed section #3458 synchronization to its documented plane near `Y=-0.8595 mm`; the MRI and 200 µm views report their separately sampled slice centres.
+- Reference X/Z to registered-section inverse-geometry mapping and out-of-bounds handling are covered by automated tests.
+- Full browser click → section refinement → provider fetch → downloaded-ZIP inspection remains incomplete. Do not interpret the app as having passed that end-to-end browser check yet.
 
 The verified detailed source is the [EBRAINS record for section #3458](https://search.kg.ebrains.eu/instances/73c1fa55-d099-4854-8cda-c9a403c6080a). The earlier siibra reports [#704](https://github.com/FZJ-INM1-BDA/siibra-python/issues/704), [#705](https://github.com/FZJ-INM1-BDA/siibra-python/issues/705), and [#706](https://github.com/FZJ-INM1-BDA/siibra-python/issues/706) are documented as historical issue reports, not assumptions about current behaviour.
 

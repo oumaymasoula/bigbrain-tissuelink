@@ -26,18 +26,19 @@ from volume_alignment import (
     native_neighbourhood_crop,
     volume_metadata,
 )
-from bigbrain_cutout import Bounds, MAX_BYTES, display_plane, fetch_crop
+from bigbrain_cutout import Bounds, MAX_BYTES, display_plane, fetch_crop, map_source_bounds_to_preview_rect
+from bigbrain_cutout import section_catalogue
 from registered_section_demo import (
     OVERVIEW_MAX_BYTES,
     OVERVIEW_RESOLUTION_MM,
-    SECTION_ID,
-    SECTION_URL,
     map_section_pixel_to_world,
+    map_section_world_to_pixel,
     registered_context,
     registered_overview,
     world_to_grid_pixel,
     add_rect,
 )
+from display_utils import _display_grayscale, has_intensity_variation, rgb_with_crosshair
 
 
 ROOT = Path(__file__).resolve().parent
@@ -56,14 +57,64 @@ def validate_navigation_targets(root: Path = ROOT) -> None:
 validate_navigation_targets()
 
 st.set_page_config(page_title="BigBrain TissueLink", layout="wide")
-st.title("BigBrain TissueLink")
-st.caption("MRI–Histology Explorer")
+st.markdown(
+    """
+    <style>
+    :root { --ink:#102238; --muted:#63748a; --teal:#087f8c; --teal-soft:#e9f7f7; --line:#dbe4ec; --warm:#fff8e7; }
+    .stApp { background: #f7f9fc; }
+    [data-testid="stHeader"] { background: rgba(247,249,252,.92); }
+    [data-testid="stSidebar"] { background: #eef3f7; border-right: 1px solid var(--line); }
+    [data-testid="stSidebarNav"] span { font-weight: 600; }
+    .tl-hero { padding: 1.2rem 1.45rem 1rem; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(135deg,#ffffff 0%,#eef8f8 100%); box-shadow: 0 8px 24px rgba(16,34,56,.06); margin-bottom: 1rem; }
+    .tl-kicker { color: var(--teal); font-size:.78rem; font-weight:800; letter-spacing:.13em; text-transform:uppercase; margin-bottom:.35rem; }
+    .tl-hero h1 { color: var(--ink); font-size:2.1rem; line-height:1.1; margin:0; }
+    .tl-hero p { color:var(--muted); font-size:1rem; margin:.55rem 0 0; max-width: 760px; }
+    .tl-steps { display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem; margin: .85rem 0 1.25rem; }
+    .tl-step { background:#fff; border:1px solid var(--line); border-radius:12px; padding:.7rem .8rem; min-height:62px; }
+    .tl-step b { display:block; color:var(--teal); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; }
+    .tl-step span { color:var(--ink); font-weight:650; font-size:.9rem; }
+    .tl-section { color:var(--ink); font-weight:750; font-size:1.25rem; margin: .8rem 0 .25rem; }
+    .tl-note { color:var(--muted); font-size:.88rem; }
+    .tl-status { display:inline-block; border-radius:999px; padding:.25rem .6rem; background:var(--teal-soft); color:#08646d; font-size:.78rem; font-weight:700; }
+    @media (max-width: 760px) { .tl-steps { grid-template-columns:repeat(2,1fr); } .tl-hero h1 { font-size:1.65rem; } }
+    </style>
+    <div class="tl-hero">
+      <div class="tl-kicker">BigBrain reference anatomy</div>
+      <h1>BigBrain TissueLink</h1>
+      <p>Explore a shared MRI–histology location, choose a registered tissue section, and export a bounded patch with its spatial provenance.</p>
+    </div>
+    <div class="tl-steps">
+      <div class="tl-step"><b>01 · Navigate</b><span>Find a location</span></div>
+      <div class="tl-step"><b>02 · Choose</b><span>Select a tissue area</span></div>
+      <div class="tl-step"><b>03 · Inspect</b><span>Preview the patch</span></div>
+      <div class="tl-step"><b>04 · Export</b><span>Download raw data</span></div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 st.warning("Reference data from one donor; anatomical alignment is imperfect.")
+st.caption("Public reference data only · not patient MRI · raw scientific values are preserved in exports")
 with st.expander("Limitations and provenance", expanded=False):
     st.write(
         "This is reference-anatomy inspection, not patient MRI, arbitrary participant MRI, registration, "
         "or a clinical tool. Matching world coordinates do not guarantee matching anatomy. The detailed "
         "siibra section is linked by documented reference-space geometry only and remains Not independently reviewed."
+    )
+with st.expander("How to use TissueLink", expanded=True):
+    st.markdown(
+        """
+        **1. Choose a registered section**
+        Select the available histology section. This chooses its physical plane, not the patch location.
+
+        **2. Find a location**
+        Click either compact MRI or 200 µm histology overview. The yellow crosshair moves to that shared reference-space location.
+
+        **3. Choose the tissue area**
+        In the large registered-section image, click a visible dark tissue area. The cyan rectangle shows exactly what will be fetched.
+
+        **4. Preview and export**
+        Click **Fetch this selected detailed patch**, inspect the returned resolution and bounds, then download the ZIP. The NIfTI contains raw values; PNGs are visualizations.
+        """
     )
 
 
@@ -90,26 +141,6 @@ def overlay_view(mri_view: np.ndarray, hist_view: np.ndarray, opacity: float) ->
     mri_rgb[..., 1:] *= 0.25
     hist_rgb[..., 0] *= 0.25
     return np.clip((1.0 - opacity) * mri_rgb + opacity * hist_rgb, 0, 255).astype(np.uint8)
-
-
-def _display_grayscale(view: np.ndarray) -> np.ndarray:
-    """Convert display input to 2-D only; never mutate or resample source data."""
-    array = np.asarray(view)
-    if array.ndim == 3 and 1 in array.shape:
-        array = np.squeeze(array)
-    if array.ndim != 2:
-        raise ValueError(f"display overlay requires a 2-D grayscale array; got shape {array.shape}")
-    return array
-
-
-def rgb_with_crosshair(view: np.ndarray, u: int, v: int, colour=(255, 255, 0)) -> np.ndarray:
-    gray = _display_grayscale(view)
-    result = np.repeat(gray[..., None], 3, axis=2).astype(np.uint8)
-    if 0 <= u < result.shape[1]:
-        result[:, u] = colour
-    if 0 <= v < result.shape[0]:
-        result[v, :] = colour
-    return result
 
 
 def compact_display(view: np.ndarray, max_width: int = 420) -> tuple[np.ndarray, float]:
@@ -214,11 +245,12 @@ def location_report_bytes(saved: dict) -> bytes:
 
 
 def registered_patch_report_bytes(saved: dict) -> bytes:
-    """Package one raw #3458 patch and its reference-space provenance."""
+    """Package one raw registered-section patch and its provenance."""
+    section_number = saved["metadata"].get("section_number", "selected")
     report = io.BytesIO()
     with zipfile.ZipFile(report, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("registered_section_3458_raw.nii.gz", saved["raw_nifti"])
-        archive.writestr("registered_section_3458_visualization.png", saved["patch_png"])
+        archive.writestr(f"registered_section_{section_number}_raw.nii.gz", saved["raw_nifti"])
+        archive.writestr(f"registered_section_{section_number}_visualization.png", saved["patch_png"])
         archive.writestr("reconstructed_histology_200um_footprint.png", saved["footprint_png"])
         archive.writestr("metadata.json", json.dumps(saved["metadata"], indent=2) + "\n")
         archive.writestr("README.txt", "Raw NIfTI values are preserved. PNG files are visualization-only. Reference-space placement is not independently reviewed and is not a claim of exact MRI correspondence.\n")
@@ -231,6 +263,41 @@ if not MRI.path.exists() or not HIST.path.exists():
 
 mri, hist = get_images()
 common = common_world_bounds([mri, hist])
+catalogue = section_catalogue()
+if not catalogue:
+    st.error("No registered detailed sections are available from the installed siibra configuration.")
+    st.stop()
+
+section_options = [f"#{item['section_number']} · {item['section_plane_y_mm']:.4f} mm" for item in catalogue]
+st.markdown('<div class="tl-section">1. Choose a registered section</div>', unsafe_allow_html=True)
+st.markdown('<div class="tl-note">This sets the documented histology plane. You will choose the patch location in the section image later.</div>', unsafe_allow_html=True)
+with st.container(border=True):
+    section_option = st.selectbox(
+        "Registered section",
+        section_options,
+        index=next((index for index, item in enumerate(catalogue) if item["section_number"] == 3458), 0),
+        key="registered-section-option",
+        label_visibility="visible",
+    )
+selected_catalogue = catalogue[section_options.index(section_option)]
+selected_section_id = selected_catalogue["id"]
+selected_section_number = selected_catalogue["section_number"]
+selected_section_label = selected_catalogue["label"]
+if st.session_state.get("selected_registered_section_id") != selected_section_id:
+    if "selected_registered_section_id" in st.session_state:
+        for key in ("volume_viewer_registered_patch", "volume_viewer_registered_signature", "volume_viewer_section_point", "volume_viewer_last_section_click"):
+            st.session_state.pop(key, None)
+    st.session_state.selected_registered_section_id = selected_section_id
+    # Section selection is an explicit navigation action: align both reference
+    # views to the documented section plane before rendering them.
+    st.session_state.world_y_slice = float(selected_catalogue["section_plane_y_mm"])
+    st.session_state.registered_navigation_active = True
+verified_sections = st.session_state.get("registered_fetch_verified_ids", set())
+fetch_status = "verified in this session" if selected_section_id in verified_sections else "not yet verified in this session"
+st.markdown(
+    f'<span class="tl-status">Section #{selected_section_number} · Y≈{selected_catalogue["section_plane_y_mm"]:.4f} mm · fetch {fetch_status}</span>',
+    unsafe_allow_html=True,
+)
 
 with st.expander("Advanced · source and technical metadata", expanded=False):
     st.caption("Sources: official donor MRI `3D_MRI/nii/mri_to_blk_aligned.nii.gz` and native histological-space `full8_200um_optbal.nii.gz`.")
@@ -251,8 +318,13 @@ if "last_location_click" not in st.session_state:
     st.session_state.last_location_click = None
 if "pending_location" in st.session_state:
     pending_location = st.session_state.pop("pending_location")
-    st.session_state.location_x_input = pending_location[0]
-    st.session_state.location_z_input = pending_location[1]
+    if isinstance(pending_location, dict):
+        st.session_state.location_x_input = float(pending_location["x"])
+        st.session_state.location_z_input = float(pending_location["z"])
+        st.session_state.world_y_slice = float(pending_location["y"])
+    else:
+        st.session_state.location_x_input = float(pending_location[0])
+        st.session_state.location_z_input = float(pending_location[1])
 if "pending_registered_reference" in st.session_state:
     pending_reference = st.session_state.pop("pending_registered_reference")
     st.session_state.location_x_input = pending_reference[0]
@@ -260,26 +332,52 @@ if "pending_registered_reference" in st.session_state:
     st.session_state.world_y_slice = pending_reference[2]
 
 st.session_state.setdefault("world_y_slice", -25.7922)
-if st.button("Navigate to section #3458", key="navigate-section-3458"):
+if st.button(f"Align reference views to section #{selected_section_number} plane", key="navigate-selected-section"):
     try:
-        _, section_bbox_for_navigation, *_ = registered_context()
+        _, section_bbox_for_navigation, *_ = registered_context(selected_section_id)
         section_plane_y = float((section_bbox_for_navigation.minpoint[1] + section_bbox_for_navigation.maxpoint[1]) / 2.0)
         st.session_state.world_y_slice = section_plane_y
         st.session_state.registered_navigation_active = True
         st.rerun()
     except Exception as exc:
-        st.error(f"Could not navigate to registered section #3458: {exc}")
-world_y = st.slider("Shared world Y slice (mm)", float(common["min"][1]), float(common["max"][1]), step=0.2, key="world_y_slice")
+        st.error(f"Could not navigate to registered section #{selected_section_number}: {exc}")
 if st.session_state.get("registered_navigation_active"):
-    st.caption(f"Navigation target active: registered section #3458 plane at exact Y≈{world_y:.4f} mm; MRI and 200 µm views use their separate nearest sampled voxel centres.")
-step = st.select_slider("Inspection grid spacing (mm)", options=[0.2, 0.4, 0.8], value=0.2, format_func=lambda value: f"{value:.1f} mm/pixel")
-contrast_low, contrast_high = st.slider("Display contrast percentiles (visualization only)", 0.0, 100.0, (1.0, 99.0), 0.5)
-if contrast_high <= contrast_low:
-    st.error("The upper contrast percentile must be greater than the lower percentile.")
-    st.stop()
+    st.caption(f"Reference plane aligned to registered section #{selected_section_number} at documented Y≈{st.session_state.world_y_slice:.4f} mm.")
 
-x_world = st.number_input("Crosshair world X (mm)", min_value=float(common["min"][0]), max_value=float(common["max"][0]), step=step, key="location_x_input")
-z_world = st.number_input("Crosshair world Z (mm)", min_value=float(common["min"][2]), max_value=float(common["max"][2]), step=step, key="location_z_input")
+with st.expander("Advanced · display controls", expanded=False):
+    st.caption("These controls affect navigation and visualization only; exported scientific values are unchanged.")
+    world_y = st.slider("Reference slice Y (mm)", float(common["min"][1]), float(common["max"][1]), step=0.2, key="world_y_slice")
+
+    section_distances = []
+    for item in catalogue:
+        min_y = item["bounds_mm"]["min_y"]
+        max_y = item["bounds_mm"]["max_y"]
+        intersects = min_y <= world_y <= max_y
+        section_distances.append({
+            "section": f"#{item['section_number']}",
+            "plane_y_mm": round(item["section_plane_y_mm"], 4),
+            "distance_mm": round(0.0 if intersects else abs(item["section_plane_y_mm"] - world_y), 4),
+            "relation": "intersects selected slice" if intersects else "nearby plane",
+        })
+    section_distances.sort(key=lambda item: (item["distance_mm"], item["section"]))
+    with st.expander("Available section planes at this MRI location", expanded=False):
+        st.caption("Distance is measured along reference-space Y. A nearby plane is not the exact selected location.")
+        st.dataframe(section_distances[:12], use_container_width=True, hide_index=True)
+        nearest = section_distances[0]
+        if nearest["relation"] == "nearby plane" and st.button(f"Navigate to nearby section {nearest['section']} plane", key="navigate-nearest-section"):
+            st.session_state.world_y_slice = nearest["plane_y_mm"]
+            st.session_state.registered_navigation_active = True
+            st.rerun()
+
+    step = st.select_slider("Overview grid spacing", options=[0.2, 0.4, 0.8], value=0.2, format_func=lambda value: f"{value:.1f} mm/pixel")
+    contrast_low, contrast_high = st.slider("Display contrast (visualization only)", 0.0, 100.0, (1.0, 99.0), 0.5)
+    st.caption("Contrast changes the preview appearance only. Raw image values and scientific exports are preserved.")
+    if contrast_high <= contrast_low:
+        st.error("The upper contrast percentile must be greater than the lower percentile.")
+        st.stop()
+
+    x_world = st.number_input("Crosshair world X (mm)", min_value=float(common["min"][0]), max_value=float(common["max"][0]), step=step, key="location_x_input")
+    z_world = st.number_input("Crosshair world Z (mm)", min_value=float(common["min"][2]), max_value=float(common["max"][2]), step=step, key="location_z_input")
 
 mri_view, hist_view, x_axis, z_axis = plane_views(world_y, common["min"][0], common["max"][0], common["min"][2], common["max"][2], step, contrast_low, contrast_high)
 x_pixel = int(np.clip(round((x_world - x_axis[0]) / step), 0, len(x_axis) - 1))
@@ -293,7 +391,7 @@ hist_display = add_orientation_labels(add_scale_bar(rgb_with_crosshair(hist_view
 mri_navigation, mri_display_scale = compact_display(mri_display)
 hist_navigation, hist_display_scale = compact_display(hist_display)
 
-st.subheader("1. Find a location")
+st.markdown('<div class="tl-section">2. Find a location</div>', unsafe_allow_html=True)
 st.caption("Click either compact overview to move the shared crosshair. Both panels show the same physical X/Z field of view.")
 col1, col2 = st.columns(2)
 with col1:
@@ -315,22 +413,27 @@ for modality, click in (("mri", mri_click), ("histology", hist_click)):
         if click_key != st.session_state.last_location_click:
             st.session_state.last_location_click = click_key
             st.session_state.pending_location = [world[0], world[2]]
+            # A new reference click supersedes any refined section point.
+            # The next render carries this X/Z through the verified inverse
+            # provider geometry, or reports it as out of bounds.
+            for key in ("volume_viewer_section_point", "volume_viewer_registered_patch", "volume_viewer_registered_signature"):
+                st.session_state.pop(key, None)
             st.rerun()
-st.caption(
-    f"Physical display contract: horizontal axis = world X ({x_axis[0]:.2f} to {x_axis[-1]:.2f} mm), "
-    f"vertical axis = world Z ({z_axis[0]:.2f} to {z_axis[-1]:.2f} mm), {step:.2f} mm per display pixel; "
-    "no display flip or axis swap is applied; horizontal L/R and vertical I/S follow RAS; "
-    "A/P is the shared out-of-plane world-Y slice; scale bars are visualization-only."
-)
-st.info(
-    "The magenta outline is the containing MRI voxel (sampling footprint only). "
-    "A documented registration-uncertainty radius is unavailable, so no uncertainty circle is drawn. "
-    "The displayed 200 µm reconstruction does not provide cellular detail."
-)
+with st.expander("Advanced · display mapping and diagnostics", expanded=False):
+    st.caption(
+        f"Physical display mapping: horizontal world X ({x_axis[0]:.2f} to {x_axis[-1]:.2f} mm), "
+        f"vertical world Z ({z_axis[0]:.2f} to {z_axis[-1]:.2f} mm), {step:.2f} mm per display pixel; "
+        "no display flip or axis swap; horizontal L/R and vertical I/S follow RAS; "
+        "A/P is the shared out-of-plane world-Y slice."
+    )
+    st.info(
+        "The magenta outline marks the containing MRI sampling voxel; it is not an uncertainty estimate. "
+        "No documented registration-uncertainty radius is available. The 200 µm reconstruction does not provide cellular detail."
+    )
 
-st.subheader("2. Inspect the linked location")
-st.info("The enlarged views cover the same physical neighbourhood. Enlarging 200 µm histology does not reveal individual cells.")
-half_width_mm = st.slider("Neighbourhood half-width (same physical coverage)", 1.0, 20.0, 5.0, 0.5)
+st.markdown('<div class="tl-section">3. Inspect the linked location</div>', unsafe_allow_html=True)
+st.caption("The enlarged views cover the same physical neighbourhood. Display enlargement does not fetch finer histology or reveal individual cells.")
+half_width_mm = st.slider("Neighbourhood size (half-width in mm)", 1.0, 20.0, 5.0, 0.5)
 half = max(1, int(round(half_width_mm / step)))
 x0, x1 = max(0, x_pixel - half), min(mri_view.shape[1], x_pixel + half + 1)
 z0, z1 = max(0, z_pixel - half), min(mri_view.shape[0], z_pixel + half + 1)
@@ -346,88 +449,154 @@ with neigh2:
     st.markdown("### Reconstructed histology — 200 µm neighbourhood")
     st.image(rgb_with_crosshair(hist_neighbour, x_pixel - x0, z_pixel - z0), use_container_width=True)
 
-st.subheader("3. Select a registered detailed section")
+st.markdown('<div class="tl-section">4. Choose the detailed patch area</div>', unsafe_allow_html=True)
 st.caption(
-    "This optional stage uses the documented reference-space placement for registered section #3458. "
+    "This stage uses the selected section's documented reference-space geometry. "
     "The MRI and 200 µm views are sampled at the displayed shared location, while the detailed-section "
     "X/Z selection is made independently on the registered overview. No Labelme files or annotation uploads are required."
 )
-explore_registered = st.checkbox("Explore available registered section #3458", value=True, key="explore-registered-3458")
+# The selected registered section is part of the main workflow, not an
+# optional gate. Keeping this path visible makes selection → fetch → export
+# available without requiring a second control before the overview renders.
+explore_registered = True
 if explore_registered:
+    registered_display_stage = "provider metadata"
     try:
-        section, section_bbox, provider, provider_volume, provider_info, provider_scale = registered_context()
+        section, section_bbox, provider, provider_volume, provider_info, provider_scale = registered_context(selected_section_id)
         section_bounds_values = tuple(float(value) for value in (*section_bbox.minpoint, *section_bbox.maxpoint))
         section_y = float((section_bbox.minpoint[1] + section_bbox.maxpoint[1]) / 2.0)
         section_x = float((section_bbox.minpoint[0] + section_bbox.maxpoint[0]) / 2.0)
         section_z = float((section_bbox.minpoint[2] + section_bbox.maxpoint[2]) / 2.0)
         mri_section_voxel, mri_section_center = nearest_voxel_for_world(mri, np.array([section_x, section_y, section_z]))
         hist_section_voxel, hist_section_center = nearest_voxel_for_world(hist, np.array([section_x, section_y, section_z]))
-        st.write({
-            "section": "#3458",
-            "section_id": SECTION_ID,
-            "provider": SECTION_URL,
-            "documented_section_plane_centre_y_mm": section_y,
-            "MRI_sampled_slice_centre_mm": mri_section_center.tolist(),
-            "histology_200um_sampled_slice_centre_mm": hist_section_center.tolist(),
-            "anatomical_status": "Not independently reviewed",
-        })
-        st.warning(
-            "Reference-space placement does not establish exact anatomical correspondence, especially with MRI. "
-            "The 200 µm volume is not cellular-equivalent. No uncertainty circle or new registration is applied."
-        )
-
-        section_image, section_plane, section_slice, section_range = registered_overview(section_bounds_values)
-        section_source = Image.fromarray(section_plane.T)
-        section_display_width = min(900, section_source.width)
-        section_display_height = max(1, round(section_source.height * section_display_width / section_source.width))
-        section_display = np.asarray(section_source.resize((section_display_width, section_display_height), Image.Resampling.NEAREST))
-        st.markdown("#### Available section: #3458")
         st.caption(
-            f"#3458 · requested overview {OVERVIEW_RESOLUTION_MM:g} mm · actual voxel size "
-            f"{[float(value) for value in section_image.header.get_zooms()[:3]]} mm · "
-            f"provider plane index y={section_slice} · raw range {section_range} · budget {OVERVIEW_MAX_BYTES:,} bytes."
+            f"Section plane centre: Y={section_y:.4f} mm · sampled MRI slice centre Y={mri_section_center[1]:.4f} mm · "
+            f"sampled 200 µm histology slice centre Y={hist_section_center[1]:.4f} mm."
         )
-        section_click = streamlit_image_coordinates(section_display, width=section_display_width, key="volume-viewer-section-3458")
-        if section_click:
-            mapped_section_point = map_section_pixel_to_world(
-                section_image, (section_click["x"], section_click["y"]),
-                (section_display_width, section_display_height), section_y,
-            )
-            st.session_state["volume_viewer_section_point"] = mapped_section_point
-            # Apply the documented section X/Z point to the linked reference
-            # views on the next rerun. Y is the exact section plane; the
-            # source-specific sampled centres remain separately reported.
-            st.session_state["pending_registered_reference"] = (
-                float(mapped_section_point["world_xyz_mm"][0]),
-                float(mapped_section_point["world_xyz_mm"][2]),
-                section_y,
-            )
-            st.session_state["registered_navigation_active"] = True
-            st.rerun()
-        section_point = st.session_state.get("volume_viewer_section_point")
-        if section_point is None:
-            section_point = map_section_pixel_to_world(
-                section_image, (section_display_width / 2, section_display_height / 2),
-                (section_display_width, section_display_height), section_y,
-            )
-            st.info("The centre marker is only a navigation default. Click the section overview to choose the detailed-patch X/Z location.")
-        selected_section_world = [float(value) for value in section_point["world_xyz_mm"]]
-        st.write({"selected_section_world_xyz_mm": selected_section_world, "mapping": section_point["mapping"]})
+        with st.expander("Advanced · section identity and sampled slice centres", expanded=False):
+            st.write({
+                "section": f"#{selected_section_number}",
+                "section_id": selected_section_id,
+                "provider": selected_catalogue["source_url"],
+                "documented_section_plane_centre_y_mm": section_y,
+                "MRI_sampled_slice_centre_mm": mri_section_center.tolist(),
+                "histology_200um_sampled_slice_centre_mm": hist_section_center.tolist(),
+                "anatomical_status": "Not independently reviewed",
+            })
+        st.caption(
+            "Reference-space placement only; anatomical correspondence has not been independently reviewed. "
+            "The 200 µm volume is not cellular-equivalent, and no new registration is applied."
+        )
 
-        overview_marked = np.repeat(section_display[..., None], 3, axis=2).astype(np.uint8)
-        section_pixel = (int(round(section_point["display_pixel_uv"][0] * section_display_width / section_display_width)), int(round(section_point["display_pixel_uv"][1] * section_display_height / section_display_height)))
-        overview_marked = rgb_with_crosshair(overview_marked, section_pixel[0], section_pixel[1])
-        st.image(overview_marked, caption="Registered section #3458 — visualization contrast only; yellow crosshair is the selected X/Z location", use_container_width=True)
-
+        registered_display_stage = "overview provider fetch"
+        section_image, section_plane, section_slice, section_range = registered_overview(section_bounds_values, selected_section_id)
+        registered_display_stage = "overview rendering"
+        section_source = Image.fromarray(section_plane.T)
+        fit_scale = min(900 / section_source.width, 620 / section_source.height, 1.0)
+        section_display_width = max(1, round(section_source.width * fit_scale))
+        section_display_height = max(1, round(section_source.height * fit_scale))
+        section_display = np.asarray(section_source.resize((section_display_width, section_display_height), Image.Resampling.NEAREST))
+        st.markdown(f"#### Choose a detailed patch location in section #{selected_section_number}")
+        st.caption(
+            f"#{selected_section_number} · requested overview {OVERVIEW_RESOLUTION_MM:g} mm · actual voxel size "
+            f"{[float(value) for value in section_image.header.get_zooms()[:3]]} mm · "
+            f"provider plane index y={section_slice} · raw range {section_range} · fitted display {section_display_width}×{section_display_height}px · budget {OVERVIEW_MAX_BYTES:,} bytes."
+        )
         registered_half_x = st.number_input("Detailed patch half-width X (mm)", 0.25, 2.0, 1.0, 0.25, key="volume-viewer-registered-half-x")
         registered_half_z = st.number_input("Detailed patch half-width Z (mm)", 0.25, 2.0, 1.0, 0.25, key="volume-viewer-registered-half-z")
         registered_resolution = st.selectbox("Detailed patch requested resolution (mm)", [0.01, 0.02, 0.1], index=0, key="volume-viewer-registered-resolution")
+        point_was_selected = "volume_viewer_section_point" in st.session_state
+        section_point = st.session_state.get("volume_viewer_section_point")
+        reference_point_available = False
+        if section_point is None:
+            reference_xz = (float(x_world), float(z_world))
+            reference_in_section = (
+                float(section_bbox.minpoint[0]) <= reference_xz[0] <= float(section_bbox.maxpoint[0])
+                and float(section_bbox.minpoint[2]) <= reference_xz[1] <= float(section_bbox.maxpoint[2])
+            )
+            if reference_in_section:
+                try:
+                    section_point = map_section_world_to_pixel(
+                        section_image, (reference_xz[0], section_y, reference_xz[1]),
+                        (section_display_width, section_display_height),
+                    )
+                    reference_point_available = True
+                except ValueError:
+                    section_point = None
+            if section_point is None:
+                section_point = map_section_pixel_to_world(
+                    section_image, (section_display_width / 2, section_display_height / 2),
+                    (section_display_width, section_display_height), section_y,
+                )
+        selected_section_world = [float(value) for value in section_point["world_xyz_mm"]]
         selected_x, selected_z = selected_section_world[0], selected_section_world[2]
         requested_section_bounds = Bounds(
             max(float(section_bbox.minpoint[0]), selected_x - registered_half_x), float(section_bbox.minpoint[1]), max(float(section_bbox.minpoint[2]), selected_z - registered_half_z),
             min(float(section_bbox.maxpoint[0]), selected_x + registered_half_x), float(section_bbox.maxpoint[1]), min(float(section_bbox.maxpoint[2]), selected_z + registered_half_z),
         )
         requested_section_bounds.validate()
+
+        section_rect = map_source_bounds_to_preview_rect(
+            (requested_section_bounds.min_x, requested_section_bounds.min_z,
+             requested_section_bounds.max_x, requested_section_bounds.max_z),
+            section_image.affine, section_image.shape,
+            (section_display_width, section_display_height),
+        )
+        section_pixel = (
+            int(np.clip(round(section_point["display_pixel_uv"][0]), 0, section_display_width - 1)),
+            int(np.clip(round(section_point["display_pixel_uv"][1]), 0, section_display_height - 1)),
+        )
+        selection_display = rgb_with_crosshair(section_display, section_pixel[0], section_pixel[1])
+        selection_display = add_rect(
+            selection_display,
+            (
+                int(round(section_rect["left"])), int(round(section_rect["top"])),
+                int(round(section_rect["left"] + section_rect["width"])),
+                int(round(section_rect["top"] + section_rect["height"])),
+            ),
+        )
+        st.markdown("### Choose where to fetch the detailed patch")
+        st.caption(
+            "Click a visible dark tissue area in the image below. This chooses the centre of the detailed patch, "
+            "not a new section. Yellow = selected point; cyan = the exact requested patch footprint. "
+            f"Requested footprint: {2 * registered_half_x:g} × {2 * registered_half_z:g} mm."
+        )
+        if section_range[0] == section_range[1]:
+            st.error(
+                "This section overview has no intensity variation at the selected plane, so there is no visible tissue "
+                "location to select. Choose another registered section; no background patch will be exported."
+            )
+        section_click = streamlit_image_coordinates(selection_display, width=section_display_width, key="volume-viewer-section-overview")
+        section_click_key = None
+        if section_click:
+            section_click_key = (
+                round(float(section_click.get("x", 0.0)), 2),
+                round(float(section_click.get("y", 0.0)), 2),
+            )
+        if section_click and section_click_key != st.session_state.get("volume_viewer_last_section_click"):
+            st.session_state["volume_viewer_last_section_click"] = section_click_key
+            mapped_section_point = map_section_pixel_to_world(
+                section_image, (section_click["x"], section_click["y"]),
+                (section_display_width, section_display_height), section_y,
+            )
+            st.session_state["volume_viewer_section_point"] = mapped_section_point
+            st.session_state["pending_registered_reference"] = (
+                float(mapped_section_point["world_xyz_mm"][0]),
+                float(mapped_section_point["world_xyz_mm"][2]),
+                section_y,
+            )
+            st.session_state["registered_navigation_active"] = True
+            st.session_state.pop("volume_viewer_registered_patch", None)
+            st.session_state.pop("volume_viewer_registered_signature", None)
+            st.rerun()
+        if point_was_selected:
+            st.success("Patch centre selected. The cyan rectangle is the area that the Fetch button will request.")
+        elif reference_point_available:
+            st.info("The current reference X/Z point is inside this section and has been carried into the overview. Click the image to refine it.")
+        else:
+            st.info("The current reference X/Z point is outside this section. Click inside the section image to choose a valid tissue location.")
+        with st.expander("Advanced · selected point mapping", expanded=False):
+            st.write({"selected_section_world_xyz_mm": selected_section_world, "mapping": section_point["mapping"]})
         footprint_x0, footprint_z0 = world_to_grid_pixel((requested_section_bounds.min_x, requested_section_bounds.min_z), x_axis, z_axis)
         footprint_x1, footprint_z1 = world_to_grid_pixel((requested_section_bounds.max_x, requested_section_bounds.max_z), x_axis, z_axis)
         hist_footprint = add_rect(
@@ -441,17 +610,28 @@ if explore_registered:
         registered_signature = (tuple(round(value, 6) for value in selected_section_world), float(registered_half_x), float(registered_half_z), float(registered_resolution))
         if st.session_state.get("volume_viewer_registered_signature") != registered_signature:
             st.session_state.pop("volume_viewer_registered_patch", None)
-        if st.button("Fetch selected registered detailed patch", type="primary", key="volume-viewer-fetch-registered"):
+        if st.button("Fetch this selected detailed patch", type="primary", disabled=not (point_was_selected or reference_point_available), key="volume-viewer-fetch-registered"):
             try:
-                with st.spinner("Fetching bounded registered section #3458 patch…"):
+                with st.spinner(f"Fetching bounded registered section #{selected_section_number} patch…"):
                     detailed_patch, detailed_section, _ = fetch_crop(
                         requested_section_bounds, resolution_mm=registered_resolution,
-                        max_bytes=MAX_BYTES, section_id=SECTION_ID,
+                        max_bytes=MAX_BYTES, section_id=selected_section_id,
                     )
+                raw_patch = np.asanyarray(detailed_patch.dataobj)
+                if not has_intensity_variation(raw_patch):
+                    st.session_state.pop("volume_viewer_registered_patch", None)
+                    st.session_state.pop("volume_viewer_registered_signature", None)
+                    st.error(
+                        f"The provider returned a constant/background patch for section #{selected_section_number} "
+                        f"(shape {tuple(raw_patch.shape)}, value {raw_patch.flat[0] if raw_patch.size else 'empty'}). "
+                        "No detailed export was created. Click a tissue-containing area in the section overview and try again."
+                    )
+                    st.stop()
                 st.session_state["volume_viewer_registered_signature"] = registered_signature
                 st.session_state["volume_viewer_registered_patch"] = (detailed_patch, detailed_section, requested_section_bounds, section_point)
+                st.session_state.setdefault("registered_fetch_verified_ids", set()).add(selected_section_id)
             except Exception as exc:
-                st.error(f"Registered section #3458 fetch failed: {exc}")
+                st.error(f"Registered section #{selected_section_number} fetch failed: {exc}")
 
         registered_patch_state = st.session_state.get("volume_viewer_registered_patch")
         if registered_patch_state and st.session_state.get("volume_viewer_registered_signature") == registered_signature:
@@ -461,13 +641,15 @@ if explore_registered:
             detailed_zooms = [float(value) for value in detailed_patch.header.get_zooms()[:3]]
             detail_zoom = st.slider("Detailed patch display enlargement (visual only)", 1.0, 4.0, 2.0, 0.25, key="volume-viewer-detail-zoom")
             patch_display = np.asarray(patch_source.resize((max(1, round(patch_source.width * detail_zoom)), max(1, round(patch_source.height * detail_zoom))), Image.Resampling.NEAREST))
-            patch_display = add_orientation_labels(add_scale_bar(patch_display, detailed_zooms[0]), "Registered detailed section #3458 · raw values")
+            patch_display = add_orientation_labels(add_scale_bar(patch_display, detailed_zooms[0]), f"Registered detailed section #{selected_section_number} · raw values")
             detailed_nifti = nifti_bytes(detailed_patch)
             detailed_metadata = {
                 "status": "reference_space_placement_not_independently_reviewed",
-                "section_label": "#3458",
-                "section_id": SECTION_ID,
-                "provider_url": SECTION_URL,
+                "section_label": f"#{selected_section_number}",
+                "section_number": selected_section_number,
+                "section_name": selected_section_label,
+                "section_id": selected_section_id,
+                "provider_url": selected_catalogue["source_url"],
                 "coordinate_space": "BigBrain microscopic template / documented registered-section reference space",
                 "section_plane": {
                     "centre_y_mm": section_y,
@@ -507,8 +689,8 @@ if explore_registered:
                 "anatomical_review": "Not independently reviewed; reference-space placement does not establish exact MRI correspondence.",
                 "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
             }
-            st.markdown("## 4. Detailed tissue patch")
-            st.success("Bounded real-data patch retrieved from the registered #3458 provider.")
+            st.markdown("## 5. Review and export the detailed patch")
+            st.success(f"Bounded real-data patch retrieved from the registered #{selected_section_number} provider.")
             st.markdown(
                 f"**Actual returned pixel size: {detailed_patch.shape[2]} × {detailed_patch.shape[0]} pixels (X × Z plane)**  "
                 f"\n**Native voxel size: {detailed_zooms[0]:g} × {detailed_zooms[2]:g} mm**"
@@ -523,13 +705,13 @@ if explore_registered:
                 "raw_range": detailed_range,
                 "estimated_uncompressed_bytes": int(np.asanyarray(detailed_patch.dataobj).nbytes),
             })
-            st.image(patch_display, caption=f"Registered detailed section #3458 — actual returned resolution {detailed_zooms} mm; visualization contrast only", use_container_width=True)
+            st.image(patch_display, caption=f"Registered detailed section #{selected_section_number} — actual returned resolution {detailed_zooms} mm; visualization contrast only", use_container_width=True)
             registered_package = {"raw_nifti": detailed_nifti, "patch_png": png_bytes(patch_display), "footprint_png": png_bytes(hist_footprint), "metadata": detailed_metadata}
-            st.download_button("Download registered MRI → section patch package", registered_patch_report_bytes(registered_package), "registered_section_3458_patch.zip", "application/zip", key="volume-viewer-download-registered")
+            st.download_button("Download registered MRI → section patch package", registered_patch_report_bytes(registered_package), f"registered_section_{selected_section_number}_patch.zip", "application/zip", key="volume-viewer-download-registered")
         else:
-            st.info("Select an available section and fetch a detailed tissue patch.")
+            st.info("No detailed patch fetched yet. Choose a section, click tissue in the fitted section image, then click ‘Fetch this selected detailed patch’. ")
     except Exception as exc:
-        st.error(f"Could not load the registered #3458 metadata or overview: {exc}")
+        st.error(f"Registered section #{selected_section_number} {registered_display_stage} failed: {exc}")
 
 with st.expander("Optional comparison views", expanded=False):
     overlay_opacity = st.slider("Histology opacity in red/cyan overlay", 0.0, 1.0, 0.5, 0.05)
@@ -610,7 +792,7 @@ if st.session_state.saved_locations:
     saved = st.session_state.saved_locations[saved_name]
     if st.button("Reopen selected location"):
         point = saved["metadata"]["requested_world_xyz_mm"]
-        st.session_state.pending_location = [point[0], point[2]]
+        st.session_state.pending_location = {"x": point[0], "y": point[1], "z": point[2]}
         st.session_state.last_location_click = None
         st.rerun()
     with st.expander("Saved metadata JSON", expanded=False):

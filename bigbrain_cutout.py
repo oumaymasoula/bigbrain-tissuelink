@@ -9,6 +9,7 @@ import sys
 import zipfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 import nibabel as nib
@@ -48,33 +49,75 @@ class Bounds:
         return BoundingBox([self.min_x, self.min_y, self.min_z], [self.max_x, self.max_y, self.max_z], space=SPACE)
 
 
+def _section_number(label: str) -> int:
+    try:
+        return int(label.split("#", 1)[1].split(":", 1)[0])
+    except (IndexError, ValueError):
+        return 10**9
+
+
+def _provider_metadata(section):
+    """Read only the official provider metadata for one configured section."""
+    provider = next(iter(section._providers.values()))
+    volume = next(iter(provider._fragments.values()))
+    if volume._info is None:
+        volume._bootstrap()
+    info = volume._info or {}
+    return provider, volume, info
+
+
+@lru_cache(maxsize=1)
 def available_sections():
+    """Return configured, registered sections without downloading image data.
+
+    The siibra feature query is restricted to ``CellbodyStainedSection`` and
+    records are retained only when the configured provider identifies the
+    registered-section endpoint. Raw or unaligned providers are excluded; no
+    URL or coordinate is constructed from a section number.
+    """
     import siibra
     from siibra.locations import BoundingBox
     query = BoundingBox(SECTION_QUERY_BOUNDS[:3], SECTION_QUERY_BOUNDS[3:], space=SPACE)
     result = []
     for section in siibra.features.get(query, "CellbodyStainedSection"):
         bbox = section.get_boundingbox(clip=False)
-        provider = next(iter(section._providers.values()))
-        volume = next(iter(provider._fragments.values()))
+        provider, volume, info = _provider_metadata(section)
+        source_url = str(provider._init_url)
+        if "/registered_sections/" not in source_url:
+            continue
         resolutions = []
-        for scale in volume._info.get("scales", []):
+        for scale in info.get("scales", []):
             resolutions.append({
                 "key": scale["key"],
                 "voxel_size_mm": [float(value) / 1_000_000.0 for value in scale["resolution"]],
             })
+        bounds_mm = {
+            "min_x": float(bbox.minpoint[0]), "min_y": float(bbox.minpoint[1]), "min_z": float(bbox.minpoint[2]),
+            "max_x": float(bbox.maxpoint[0]), "max_y": float(bbox.maxpoint[1]), "max_z": float(bbox.maxpoint[2]),
+        }
         result.append({
             "id": section.id,
             "label": section.name,
-            "source_url": provider._init_url,
-            "bounds_mm": {
-                "min_x": float(bbox.minpoint[0]), "min_y": float(bbox.minpoint[1]), "min_z": float(bbox.minpoint[2]),
-                "max_x": float(bbox.maxpoint[0]), "max_y": float(bbox.maxpoint[1]), "max_z": float(bbox.maxpoint[2]),
-            },
+            "section_number": _section_number(section.name),
+            "source_url": source_url,
+            "coordinate_space": getattr(section.space, "name", str(section.space)),
+            "bounds_mm": bounds_mm,
+            "section_plane_y_mm": (bounds_mm["min_y"] + bounds_mm["max_y"]) / 2.0,
             "resolutions": resolutions,
+            "dataset_order": list(info.get("dataset_order", [])),
+            "provider_transform_nm": np.asarray(volume.transform_nm, dtype=float).tolist(),
+            "provider_class": type(provider).__name__,
+            "registration_status": "registered provider metadata",
+            "metadata_retrieval_status": "verified from installed siibra configuration",
+            "real_fetch_verification_status": "not verified in this session",
             "section": section,
         })
-    return sorted(result, key=lambda item: item["label"])
+    return tuple(sorted(result, key=lambda item: item["section_number"]))
+
+
+def section_catalogue():
+    """Return JSON-safe metadata for the registered-section catalogue."""
+    return tuple({key: value for key, value in item.items() if key != "section"} for item in available_sections())
 
 
 def get_section(section_id: str = SECTION_ID):
